@@ -1,0 +1,107 @@
+# The whole Project 2 stack on the desktop. Every port is published on localhost only.
+#   infrastructure only:  docker compose up -d postgres rabbitmq kafka sftp
+#   everything:           ./mvnw -DskipTests package && docker compose up -d --build
+name: bank-integration
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      # 5435: 5432 is a native PostgreSQL, 5433 another project's, 5434 bank-core's own compose database.
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - integration-db:/var/lib/postgresql/data
+      # Runs once, on an empty volume: a database and an owner each for bank-core and bank-integration.
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  rabbitmq:
+    image: rabbitmq:4.3-management-alpine   # the same tag as rabbitmq.image in pom.xml
+    # RabbitMQ keeps its data per node name, and the node name comes from the hostname.
+    hostname: rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"   # management UI, user interbank / interbank
+    volumes:
+      - ./docker/rabbitmq/20-interbank.conf:/etc/rabbitmq/conf.d/20-interbank.conf:ro
+      - rabbitmq-data:/var/lib/rabbitmq
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  kafka:
+    image: apache/kafka-native:4.4.0
+    hostname: kafka
+    ports:
+      - "127.0.0.1:9092:9092"
+    # One node that is both broker and KRaft controller, from Kafka's own single-node example. Programs on the
+    # desktop connect to localhost:9092, containers in this stack to kafka:19092.
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT_HOST://:9092,PLAINTEXT://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_HOST://localhost:9092,PLAINTEXT://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      CLUSTER_ID: YmFuay1pbnRlZ3JhdGlvbg   # 16 bytes, base64: "bank-integration"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      # Inside the container, so topics start empty with every new container (step 2 decides on a volume).
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    mem_limit: 512m
+
+  sftp:
+    image: atmoz/sftp:alpine
+    ports:
+      - "127.0.0.1:2222:22"
+    # user:password:uid:gid:folder. The partner bank drops its account statements (camt.053) here in step 7.
+    command: partner:partner:1001:1001:statements
+    mem_limit: 64m
+
+  integration-service:
+    build: ./integration-service
+    image: integration-service:local
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      # JSON logs in Elastic Common Schema, ready for ELK in Project 3.
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+    ports:
+      - "127.0.0.1:8082:8082"
+    mem_limit: 768m
+
+  partner-bank-sim:
+    build: ./partner-bank-sim
+    image: partner-bank-sim:local
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+    ports:
+      - "127.0.0.1:8083:8083"
+    mem_limit: 640m
+
+volumes:
+  integration-db:
+  rabbitmq-data:

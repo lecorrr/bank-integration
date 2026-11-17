@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: integration-service
+  rabbitmq:
+    # The compose RabbitMQ on localhost; in Docker, compose sets RABBITMQ_HOST=rabbitmq.
+    host: ${RABBITMQ_HOST:localhost}
+    port: 5672
+    username: ${RABBITMQ_USER:interbank}
+    password: ${RABBITMQ_PASSWORD:interbank}
+
+server:
+  # 8080 is bank-core, 8083 the partner bank simulator.
+  port: 8082
+
+camel:
+  component:
+    spring-rabbitmq:
+      # The exchange, queues and bindings come from InterbankTopology, declared once by Spring's RabbitAdmin.
+      # A queue Camel declared on its own would lack the quorum argument, and the broker would refuse one of the two.
+      auto-declare: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    dev.tkachuk: INFO

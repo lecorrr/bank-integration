@@ -1,0 +1,19 @@
+# Build output
+target/
+*.log
+logs/
+
+# Maven wrapper downloads (the wrapper scripts and .mvn/wrapper/maven-wrapper.properties are committed)
+.mvn/wrapper/maven-wrapper.jar
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Local secrets and overrides
+.env
+*.local.yml

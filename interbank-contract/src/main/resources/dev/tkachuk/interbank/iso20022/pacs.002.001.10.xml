@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10">
+  <FIToFIPmtStsRpt>
+    <GrpHdr>
+      <MsgId>${messageId}</MsgId>
+      <CreDtTm>${createdAt}</CreDtTm>
+    </GrpHdr>
+    <OrgnlGrpInfAndSts>
+      <OrgnlMsgId>${originalMessageId}</OrgnlMsgId>
+      <OrgnlMsgNmId>pacs.008.001.08</OrgnlMsgNmId>
+    </OrgnlGrpInfAndSts>
+    <TxInfAndSts>
+      <OrgnlEndToEndId>${originalEndToEndId}</OrgnlEndToEndId>
+      <OrgnlTxId>${originalTransactionId}</OrgnlTxId>
+      <OrgnlUETR>${originalUetr}</OrgnlUETR>
+      <TxSts>${status}</TxSts>
+    </TxInfAndSts>
+  </FIToFIPmtStsRpt>
+</Document>

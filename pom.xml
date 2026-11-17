@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The same Spring Boot as bank-core; Camel 4.22 is built against Spring Boot 4.1. -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.2</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>dev.tkachuk</groupId>
+    <artifactId>bank-integration</artifactId>
+    <version>0.1.0</version>
+    <packaging>pom</packaging>
+    <name>bank-integration</name>
+    <description>Moves bank-core's payments to other banks as ISO 20022 messages over RabbitMQ and Kafka</description>
+
+    <modules>
+        <module>interbank-contract</module>
+        <module>integration-service</module>
+        <module>partner-bank-sim</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <!-- Camel 4.22 is the LTS line, supported until August 2027. -->
+        <camel.version>4.22.2</camel.version>
+        <!-- One RabbitMQ image for the integration tests; compose.yaml uses the same tag. -->
+        <rabbitmq.image>rabbitmq:4.3-management-alpine</rabbitmq.image>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.camel.springboot</groupId>
+                <artifactId>camel-spring-boot-bom</artifactId>
+                <version>${camel.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>dev.tkachuk</groupId>
+                <artifactId>interbank-contract</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- The image reaches the tests as a system property, so the tag lives here only.
+                     Surefire carries it too because IntelliJ copies Surefire's settings into its test runs. -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <systemPropertyVariables>
+                            <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <configuration>
+                        <systemPropertyVariables>
+                            <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <!-- Unit tests (*Test) run in the test phase, integration tests (*IT) in verify. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
