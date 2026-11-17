@@ -18,6 +18,16 @@ camel:
       # The exchange, queues and bindings come from InterbankTopology, declared once by Spring's RabbitAdmin.
       # A queue Camel declared on its own would lack the quorum argument, and the broker would refuse one of the two.
       auto-declare: false
+    kafka:
+      # The compose Kafka on localhost; in Docker, compose sets KAFKA_BOOTSTRAP_SERVERS=kafka:19092.
+      brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+# Our bank, and the banks we can pay through SEP, by the six-digit code in their IBANs (InterbankProperties).
+interbank:
+  bank-code: "399999"
+  bic: BNKCUAUKXXX
+  participants:
+    "388888": PRTBUAUKXXX
 
 management:
   endpoints:

@@ -12,11 +12,6 @@ public class RabbitTestcontainer {
     @Bean
     @ServiceConnection
     RabbitMQContainer rabbitmq() {
-        String image = System.getProperty("rabbitmq.image");
-        if (image == null || image.isBlank()) {
-            throw new IllegalStateException("System property rabbitmq.image is not set. Run the tests through Maven "
-                    + "(./mvnw verify), or pass -Drabbitmq.image with the tag from pom.xml.");
-        }
-        return new RabbitMQContainer(image);
+        return new RabbitMQContainer(TestImages.fromSystemProperty("rabbitmq.image"));
     }
 }

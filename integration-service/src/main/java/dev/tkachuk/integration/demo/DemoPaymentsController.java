@@ -1,9 +1,10 @@
 package dev.tkachuk.integration.demo;
 
-import dev.tkachuk.integration.interbank.InterbankGateway;
-import dev.tkachuk.integration.interbank.PaymentStatusStore;
-import dev.tkachuk.interbank.iso20022.Pacs008;
+import dev.tkachuk.integration.events.EventJson;
+import dev.tkachuk.integration.outgoing.TransferRequested;
 import java.net.URI;
+import org.apache.camel.ProducerTemplate;
+import org.apache.camel.component.kafka.KafkaConstants;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,40 +13,54 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Starts the walking skeleton by hand: POST sends the demo payment as a pacs.008, GET shows whether the
- * partner bank's pacs.002 has arrived. Answers 202 because the answer comes later, over RabbitMQ.
+ * Starts flow A by hand while bank-core cannot yet (step 3): POST publishes the demo transfer as bank-core will, a
+ * TransferRequested event on Kafka, and GET shows the status that came back as a status event. Answers 202
+ * because the status comes later.
  */
 @RestController
 @RequestMapping("/api/v1/demo/payments")
 class DemoPaymentsController {
 
-    private final DemoPayments demoPayments;
-    private final InterbankGateway gateway;
+    private final DemoTransfers demoTransfers;
+    private final ProducerTemplate producer;
+    private final EventJson json;
     private final PaymentStatusStore statuses;
 
-    DemoPaymentsController(DemoPayments demoPayments, InterbankGateway gateway, PaymentStatusStore statuses) {
-        this.demoPayments = demoPayments;
-        this.gateway = gateway;
+    DemoPaymentsController(DemoTransfers demoTransfers, ProducerTemplate producer, EventJson json,
+            PaymentStatusStore statuses) {
+        this.demoTransfers = demoTransfers;
+        this.producer = producer;
+        this.json = json;
         this.statuses = statuses;
     }
 
     @PostMapping
     ResponseEntity<PaymentStatusView> send() {
-        Pacs008 payment = demoPayments.next();
-        gateway.send(payment);
+        TransferRequested transfer = demoTransfers.next();
+        String transferId = transfer.transferId().toString();
+        // Before publishing, so REQUESTED cannot overwrite a status event that arrives first.
+        statuses.requested(transferId);
+        try {
+            // Keyed by the payer's IBAN, as bank-core will key it: one account's transfers keep their order.
+            producer.sendBodyAndHeader("kafka:" + TransferRequested.TOPIC, json.write(transfer),
+                    KafkaConstants.KEY, transfer.fromIban());
+        } catch (RuntimeException e) {
+            statuses.forget(transferId);
+            throw e;
+        }
         return ResponseEntity.accepted()
-                .location(URI.create("/api/v1/demo/payments/" + payment.messageId()))
-                .body(new PaymentStatusView(payment.messageId(), PaymentStatusStore.SENT));
+                .location(URI.create("/api/v1/demo/payments/" + transferId))
+                .body(new PaymentStatusView(transferId, PaymentStatusStore.REQUESTED));
     }
 
-    @GetMapping("/{messageId}")
-    ResponseEntity<PaymentStatusView> status(@PathVariable String messageId) {
-        return statuses.statusOf(messageId)
-                .map(status -> ResponseEntity.ok(new PaymentStatusView(messageId, status)))
+    @GetMapping("/{transferId}")
+    ResponseEntity<PaymentStatusView> status(@PathVariable String transferId) {
+        return statuses.statusOf(transferId)
+                .map(status -> ResponseEntity.ok(new PaymentStatusView(transferId, status)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /** @param status SENT until the pacs.002 arrives, then its transaction status, e.g. ACSC */
-    record PaymentStatusView(String messageId, String status) {
+    /** @param status REQUESTED until the status event arrives, then SETTLED, REJECTED or PENDING */
+    record PaymentStatusView(String transferId, String status) {
     }
 }

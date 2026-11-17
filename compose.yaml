@@ -63,7 +63,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
-      # Inside the container, so topics start empty with every new container (step 2 decides on a volume).
+      # Inside the container: docker compose stop keeps the events, docker compose down empties Kafka. A demo
+      # stack needs no more; bank-core's outbox (step 3) keeps what it has not published yet.
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
     mem_limit: 512m
 
@@ -81,8 +82,11 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
       RABBITMQ_HOST: rabbitmq
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       # JSON logs in Elastic Common Schema, ready for ELK in Project 3.
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
     ports:

@@ -14,7 +14,7 @@
 
     <groupId>dev.tkachuk</groupId>
     <artifactId>bank-integration</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
     <packaging>pom</packaging>
     <name>bank-integration</name>
     <description>Moves bank-core's payments to other banks as ISO 20022 messages over RabbitMQ and Kafka</description>
@@ -31,8 +31,17 @@
         <camel.version>4.22.2</camel.version>
         <!-- Its xjc is JAXB 4.0.9, the same version as the runtime that Spring Boot manages. -->
         <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
-        <!-- One RabbitMQ image for the integration tests; compose.yaml uses the same tag. -->
+        <!-- The Kafka client Camel 4.22 is built with; Spring Boot 4.1.2 would otherwise pick 4.2.2. -->
+        <kafka.version>4.3.1</kafka.version>
+        <!-- One RabbitMQ and one Kafka image for the integration tests; compose.yaml uses the same tags. -->
         <rabbitmq.image>rabbitmq:4.3-management-alpine</rabbitmq.image>
+        <kafka.image>apache/kafka-native:4.4.0</kafka.image>
+        <jacoco.version>0.8.13</jacoco.version>
+        <!-- Line coverage every module must reach, unit and integration tests together; generated code excluded. -->
+        <coverage.minimum>0.80</coverage.minimum>
+        <!-- The test JVMs load Mockito as an agent at start: attaching it later, as it does by itself, is what
+             newer JDKs warn about and will forbid. JaCoCo puts its own agent in front (prepare-agent). -->
+        <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</argLine>
     </properties>
 
     <dependencyManagement>
@@ -63,6 +72,7 @@
                     <configuration>
                         <systemPropertyVariables>
                             <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
+                            <kafka.image>${kafka.image}</kafka.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
@@ -72,6 +82,7 @@
                     <configuration>
                         <systemPropertyVariables>
                             <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
+                            <kafka.image>${kafka.image}</kafka.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
@@ -82,6 +93,95 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+            <!-- Coverage of each module from its unit and integration tests together, as in bank-core: the
+                 report is target/site/jacoco/index.html, and verify fails below coverage.minimum. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-unit-tests</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>dev.tkachuk.*</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>prepare-integration-tests</id>
+                        <goals>
+                            <goal>prepare-agent-integration</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>dev.tkachuk.*</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>merge-results</id>
+                        <phase>post-integration-test</phase>
+                        <goals>
+                            <goal>merge</goal>
+                        </goals>
+                        <configuration>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes>
+                                        <include>jacoco.exec</include>
+                                        <include>jacoco-it.exec</include>
+                                    </includes>
+                                </fileSet>
+                            </fileSets>
+                            <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>coverage-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                            <excludes>
+                                <exclude>dev/tkachuk/interbank/iso20022/pacs*/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>coverage-gate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                            <!-- The classes xjc generates from the schemas: getters and setters, mostly unused. -->
+                            <excludes>
+                                <exclude>dev/tkachuk/interbank/iso20022/pacs*/**</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${coverage.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
