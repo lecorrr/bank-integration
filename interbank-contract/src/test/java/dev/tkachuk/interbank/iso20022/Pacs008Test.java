@@ -4,9 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.util.function.UnaryOperator;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class Pacs008Test {
+
+    private static final String TRANSACTION = "/Document/FIToFICstmrCdtTrf/CdtTrfTxInf";
 
     @Test
     void readsBackEveryFieldItWrites() {
@@ -16,29 +23,24 @@ class Pacs008Test {
     }
 
     @Test
-    void writesThePaymentAsAPacs008Document() {
+    void writesADocumentTheOfficialSchemaAccepts() throws Exception {
         String xml = TestMessages.pacs008().toXml();
 
-        assertThat(xml).contains("xmlns=\"" + Pacs008.NAMESPACE + "\"");
-        assertThat(xml).contains("<IntrBkSttlmAmt Ccy=\"UAH\">150.00</IntrBkSttlmAmt>");
-        assertThat(xml).contains("<NbOfTxs>1</NbOfTxs>");
+        TestXml.validate(xml, Pacs008.MESSAGE_NAME);
+        assertThat(TestXml.rootNamespace(xml)).isEqualTo(Pacs008.NAMESPACE);
+        assertThat(TestXml.text(xml, "FIToFICstmrCdtTrf/GrpHdr/NbOfTxs")).isEqualTo("1");
+        assertThat(TestXml.text(xml, "FIToFICstmrCdtTrf/CdtTrfTxInf/IntrBkSttlmAmt")).isEqualTo("150.00");
     }
 
     @Test
-    void escapesTextSoAValueCannotChangeTheMessage() {
-        Pacs008 payment = TestMessages.pacs008("Tom & Jerry <Ltd> \"T&J\" 'UA'");
+    void keepsMarkupCharactersInAValueAsText() throws Exception {
+        String name = "Tom & Jerry <Ltd> \"T&J\" 'UA'";
+        Pacs008 payment = TestMessages.pacs008(name);
 
         String xml = payment.toXml();
 
-        assertThat(xml).contains("<Nm>Tom &amp; Jerry &lt;Ltd&gt; &quot;T&amp;J&quot; &apos;UA&apos;</Nm>");
+        assertThat(TestXml.text(xml, "FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm")).isEqualTo(name);
         assertThat(Pacs008.parse(xml)).isEqualTo(payment);
-    }
-
-    @Test
-    void neverReadsAValueAsAPlaceholder() {
-        Pacs008 payment = TestMessages.pacs008("${messageId}");
-
-        assertThat(Pacs008.parse(payment.toXml()).creditorName()).isEqualTo("${messageId}");
     }
 
     @Test
@@ -51,13 +53,49 @@ class Pacs008Test {
                 .hasMessageContaining(Pacs008.NAMESPACE);
     }
 
-    @Test
-    void refusesAMessageWithoutARequiredField() {
-        String xml = TestMessages.pacs008().toXml().replaceFirst("<UETR>[^<]*</UETR>", "");
+    /** What a sending bank got wrong, and where the refusal says it is. */
+    static Stream<Arguments> schemaViolations() {
+        return Stream.of(
+                Arguments.of("a lower-case currency code",
+                        replace("Ccy=\"UAH\"", "Ccy=\"uah\""), TRANSACTION + "/IntrBkSttlmAmt"),
+                Arguments.of("a 36-character message id",
+                        replaceFirst("<MsgId>[^<]*</MsgId>", "<MsgId>" + "M".repeat(36) + "</MsgId>"),
+                        "/Document/FIToFICstmrCdtTrf/GrpHdr/MsgId"),
+                Arguments.of("no charge bearer, noticed at the element after it",
+                        replaceFirst("\\s*<ChrgBr>SLEV</ChrgBr>", ""), TRANSACTION + "/Dbtr"),
+                Arguments.of("an element the schema does not have",
+                        replace("</Dbtr>", "<Nickname>Artie</Nickname></Dbtr>"), TRANSACTION + "/Dbtr/Nickname"));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("schemaViolations")
+    void refusesAMessageThatBreaksTheSchema(String violation, UnaryOperator<String> breakIt, String where) {
+        String xml = breakIt.apply(TestMessages.pacs008().toXml());
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
                 .isInstanceOf(InvalidMessageException.class)
-                .hasMessageContaining("PmtId/UETR");
+                .hasMessageContaining("breaks its schema at " + where + " (cvc-");
+    }
+
+    @Test
+    void neverQuotesTheValueThatBrokeTheSchema() {
+        String iban = TestMessages.pacs008().debtorIban();
+        String xml = TestMessages.pacs008().toXml().replace(iban, iban.substring(0, 4) + " " + iban.substring(4));
+
+        assertThatThrownBy(() -> Pacs008.parse(xml))
+                .isInstanceOf(InvalidMessageException.class)
+                .hasMessageContaining(TRANSACTION + "/DbtrAcct/Id/IBAN")
+                .hasMessageNotContaining(iban.substring(4))
+                .hasNoCause();
+    }
+
+    @Test
+    void refusesAMessageWithoutAFieldWeRequire() {
+        String xml = TestMessages.pacs008().toXml().replaceFirst("\\s*<UETR>[^<]*</UETR>", "");
+
+        assertThatThrownBy(() -> Pacs008.parse(xml))
+                .isInstanceOf(InvalidMessageException.class)
+                .hasMessageContaining("has no " + TRANSACTION + "/PmtId/UETR");
     }
 
     @Test
@@ -70,12 +108,34 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesAFieldThatBreaksItsRule() {
-        String xml = TestMessages.pacs008().toXml().replace("Ccy=\"UAH\"", "Ccy=\"uah\"");
+    void refusesMoreThanOneLineOfRemittanceInformation() {
+        String xml = TestMessages.pacs008().toXml().replace("</Ustrd>", "</Ustrd><Ustrd>Thank you</Ustrd>");
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
                 .isInstanceOf(InvalidMessageException.class)
-                .hasMessageContaining("currency");
+                .hasMessageContaining("exactly one " + TRANSACTION + "/RmtInf/Ustrd, not 2");
+    }
+
+    @Test
+    void refusesABlankIdThatTheSchemaAllows() {
+        String xml = TestMessages.pacs008().toXml().replaceFirst("<TxId>[^<]*</TxId>", "<TxId>   </TxId>");
+
+        assertThatThrownBy(() -> Pacs008.parse(xml))
+                .isInstanceOf(InvalidMessageException.class)
+                .hasMessageContaining("transactionId must be 1 to 35 characters");
+    }
+
+    @Test
+    void refusesToWriteAnAmountTheSchemaDoesNotAllow() {
+        Pacs008 valid = TestMessages.pacs008();
+        Pacs008 sixDecimals = new Pacs008(valid.messageId(), valid.createdAt(), valid.endToEndId(),
+                valid.transactionId(), valid.uetr(), new BigDecimal("150.000001"), valid.currency(),
+                valid.settlementDate(), valid.debtorName(), valid.debtorIban(), valid.debtorAgentBic(),
+                valid.creditorName(), valid.creditorIban(), valid.creditorAgentBic(), valid.remittanceInformation());
+
+        assertThatThrownBy(sixDecimals::toXml)
+                .isInstanceOf(InvalidMessageException.class)
+                .hasMessageContaining(TRANSACTION + "/IntrBkSttlmAmt (cvc-fractionDigits-valid");
     }
 
     @Test
@@ -110,5 +170,13 @@ class Pacs008Test {
                 valid.creditorIban(), valid.creditorAgentBic(), valid.remittanceInformation()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("amount");
+    }
+
+    private static UnaryOperator<String> replace(String target, String replacement) {
+        return xml -> xml.replace(target, replacement);
+    }
+
+    private static UnaryOperator<String> replaceFirst(String regex, String replacement) {
+        return xml -> xml.replaceFirst(regex, replacement);
     }
 }

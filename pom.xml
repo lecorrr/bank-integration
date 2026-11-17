@@ -14,7 +14,7 @@
 
     <groupId>dev.tkachuk</groupId>
     <artifactId>bank-integration</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <packaging>pom</packaging>
     <name>bank-integration</name>
     <description>Moves bank-core's payments to other banks as ISO 20022 messages over RabbitMQ and Kafka</description>
@@ -29,6 +29,8 @@
         <java.version>21</java.version>
         <!-- Camel 4.22 is the LTS line, supported until August 2027. -->
         <camel.version>4.22.2</camel.version>
+        <!-- Its xjc is JAXB 4.0.9, the same version as the runtime that Spring Boot manages. -->
+        <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
         <!-- One RabbitMQ image for the integration tests; compose.yaml uses the same tag. -->
         <rabbitmq.image>rabbitmq:4.3-management-alpine</rabbitmq.image>
     </properties>

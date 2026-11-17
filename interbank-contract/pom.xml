@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.tkachuk</groupId>
         <artifactId>bank-integration</artifactId>
-        <version>0.1.0</version>
+        <version>0.2.0</version>
     </parent>
 
     <artifactId>interbank-contract</artifactId>
@@ -20,6 +20,16 @@
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-amqp</artifactId>
         </dependency>
+        <!-- JAXB: the API that the generated message classes use, and its implementation at run time. -->
+        <dependency>
+            <groupId>jakarta.xml.bind</groupId>
+            <artifactId>jakarta.xml.bind-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jaxb</groupId>
+            <artifactId>jaxb-runtime</artifactId>
+            <scope>runtime</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -27,4 +37,51 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Generates the message classes from the official ISO 20022 schemas in src/main/resources/xsd, into
+                 target/generated-sources. One package per message, because both schemas define types with the
+                 same names (GroupHeader, Document and so on). -->
+            <plugin>
+                <groupId>org.jvnet.jaxb</groupId>
+                <artifactId>jaxb-maven-plugin</artifactId>
+                <version>${jaxb-maven-plugin.version}</version>
+                <configuration>
+                    <schemaDirectory>src/main/resources/xsd</schemaDirectory>
+                    <!-- No episode file: nothing compiles other schemas against these, and both executions
+                         would write the same META-INF/sun-jaxb.episode into the jar. -->
+                    <episode>false</episode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>pacs008</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <schemaIncludes>
+                                <include>pacs.008.001.08.xsd</include>
+                            </schemaIncludes>
+                            <generatePackage>dev.tkachuk.interbank.iso20022.pacs008</generatePackage>
+                            <generateDirectory>${project.build.directory}/generated-sources/pacs008</generateDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>pacs002</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <schemaIncludes>
+                                <include>pacs.002.001.10.xsd</include>
+                            </schemaIncludes>
+                            <generatePackage>dev.tkachuk.interbank.iso20022.pacs002</generatePackage>
+                            <generateDirectory>${project.build.directory}/generated-sources/pacs002</generateDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

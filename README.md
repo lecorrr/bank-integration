@@ -3,15 +3,16 @@
 Moves bank-core's payments to other banks the way banks do it: ISO 20022 messages over message brokers,
 handled by an Apache Camel service. This is Project 2 of three; bank-core is Project 1.
 
-**Status: step 1 of 8, the walking skeleton.** One fixed payment goes to a simulated partner bank as a pacs.008
-over RabbitMQ, and the partner's pacs.002 comes back. Kafka, PostgreSQL and SFTP already run in the stack and
-come into use in later steps.
+**Status: step 2 of 8, half done.** One fixed payment goes to a simulated partner bank as a pacs.008 over
+RabbitMQ, and the partner's pacs.002 comes back. Both messages are built with classes generated from the
+official ISO 20022 schemas and checked against those schemas on the way out and on the way in. Kafka,
+PostgreSQL and SFTP already run in the stack and come into use in later steps.
 
 ## Layout
 
 | Module | What it is |
 |---|---|
-| `interbank-contract` | What both banks agree on: the RabbitMQ topology (`InterbankTopology`) and the ISO 20022 messages (`Pacs008`, `Pacs002`) |
+| `interbank-contract` | What both banks agree on: the RabbitMQ topology (`InterbankTopology`) and the ISO 20022 messages (`Pacs008`, `Pacs002`), with their official schemas |
 | `integration-service` | The Camel service, port 8082: sends pacs.008 and reads the pacs.002 answers |
 | `partner-bank-sim` | Plays the other bank, port 8083: answers every pacs.008 with a pacs.002 |
 
@@ -35,6 +36,26 @@ cp -r ~/projects/bank-core/mvnw ~/projects/bank-core/.mvn .
 
 Unit tests (`*Test`) run first, then the integration tests (`*IT`), which start RabbitMQ in Docker through
 Testcontainers. The RabbitMQ image tag is `rabbitmq.image` in `pom.xml`; `compose.yaml` uses the same one.
+
+The build generates the message classes from the schemas first (`target/generated-sources/pacs008` and
+`pacs002` in `interbank-contract`); they are never edited or committed.
+
+## ISO 20022 schemas
+
+`interbank-contract/src/main/resources/xsd` holds the two official schemas, unchanged, as published by
+iso20022.org in the message set *Payments Clearing and Settlement*:
+
+| File | Message | Download |
+|---|---|---|
+| `pacs.008.001.08.xsd` | FIToFICustomerCreditTransferV08 | <https://www.iso20022.org/message/14231/download> |
+| `pacs.002.001.10.xsd` | FIToFIPaymentStatusReportV10 | <https://www.iso20022.org/message/14061/download> |
+
+`SchemaFilesTest` pins their SHA-256, and `.gitattributes` keeps git from converting their CRLF line endings.
+To check a fresh download against them:
+
+```
+sha256sum interbank-contract/src/main/resources/xsd/*.xsd
+```
 
 ## Run the demo
 
@@ -61,7 +82,7 @@ Then ask for its status with that id. It shows `SENT` until the pacs.002 arrives
 curl -s localhost:8082/api/v1/demo/payments/<messageId>
 ```
 
-Each application logs its version at startup (`integration-service 0.1.0 started`):
+Each application logs its version at startup (`integration-service 0.2.0 started`):
 
 ```
 docker compose logs integration-service partner-bank-sim
@@ -79,15 +100,14 @@ docker compose up -d rabbitmq
 ```
 
 ```
-java -jar integration-service/target/integration-service-0.1.0.jar
+java -jar integration-service/target/integration-service-0.2.0.jar
 ```
 
 ```
-java -jar partner-bank-sim/target/partner-bank-sim-0.1.0.jar
+java -jar partner-bank-sim/target/partner-bank-sim-0.2.0.jar
 ```
 
 ## What comes next
 
-Step 2 replaces the XML templates with classes generated from the official ISO 20022 XSDs, validates every
-message against them, starts from a transfer event on Kafka instead of the demo endpoint, and adds the
-coverage gate.
+The rest of step 2: the payment starts as a transfer event on Kafka instead of the demo endpoint, and its
+status goes back to Kafka as an event; the build gets a coverage gate.

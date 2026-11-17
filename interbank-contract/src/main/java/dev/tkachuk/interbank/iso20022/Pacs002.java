@@ -1,11 +1,17 @@
 package dev.tkachuk.interbank.iso20022;
 
+import dev.tkachuk.interbank.iso20022.pacs002.Document;
+import dev.tkachuk.interbank.iso20022.pacs002.FIToFIPaymentStatusReportV10;
+import dev.tkachuk.interbank.iso20022.pacs002.GroupHeader91;
+import dev.tkachuk.interbank.iso20022.pacs002.ObjectFactory;
+import dev.tkachuk.interbank.iso20022.pacs002.OriginalGroupHeader17;
+import dev.tkachuk.interbank.iso20022.pacs002.PaymentTransaction110;
 import java.time.Instant;
-import java.util.Map;
 
 /**
  * The receiving bank's answer to one pacs.008: an ISO 20022 pacs.002.001.10 payment status report. It
- * repeats the original payment's ids, which is how the sending bank matches the answer to its payment.
+ * repeats the original payment's ids, which is how the sending bank matches the answer to its payment. The XML
+ * is written and read with the classes generated from the official XSD, package {@code pacs002}.
  */
 public record Pacs002(
         String messageId,
@@ -19,8 +25,10 @@ public record Pacs002(
     public static final String NAMESPACE = "urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10";
     public static final String MESSAGE_NAME = "pacs.002.001.10";
 
-    private static final XmlTemplate TEMPLATE = XmlTemplate.load(MESSAGE_NAME + ".xml");
-    private static final String REPORT = "FIToFIPmtStsRpt/";
+    private static final Iso20022Xml<Document> XML =
+            new Iso20022Xml<>(MESSAGE_NAME, NAMESPACE, Document.class, new ObjectFactory()::createDocument);
+    private static final String ORIGINAL_GROUP = "/Document/FIToFIPmtStsRpt/OrgnlGrpInfAndSts";
+    private static final String TRANSACTION = "/Document/FIToFIPmtStsRpt/TxInfAndSts";
 
     public Pacs002 {
         Fields.max35("messageId", messageId);
@@ -39,30 +47,49 @@ public record Pacs002(
     }
 
     public String toXml() {
-        return TEMPLATE.render(Map.of(
-                "messageId", messageId,
-                "createdAt", createdAt.toString(),
-                "originalMessageId", originalMessageId,
-                "originalEndToEndId", originalEndToEndId,
-                "originalTransactionId", originalTransactionId,
-                "originalUetr", originalUetr,
-                "status", status.name()));
+        GroupHeader91 header = new GroupHeader91();
+        header.setMsgId(messageId);
+        header.setCreDtTm(XmlDates.toXml(createdAt));
+
+        OriginalGroupHeader17 original = new OriginalGroupHeader17();
+        original.setOrgnlMsgId(originalMessageId);
+        original.setOrgnlMsgNmId(Pacs008.MESSAGE_NAME);
+
+        PaymentTransaction110 transaction = new PaymentTransaction110();
+        transaction.setOrgnlEndToEndId(originalEndToEndId);
+        transaction.setOrgnlTxId(originalTransactionId);
+        transaction.setOrgnlUETR(originalUetr);
+        transaction.setTxSts(status.name());
+
+        FIToFIPaymentStatusReportV10 report = new FIToFIPaymentStatusReportV10();
+        report.setGrpHdr(header);
+        report.getOrgnlGrpInfAndSts().add(original);
+        report.getTxInfAndSts().add(transaction);
+        Document document = new Document();
+        document.setFIToFIPmtStsRpt(report);
+        return XML.write(document);
     }
 
-    /** @throws InvalidMessageException when the XML is not a pacs.002.001.10 with every field we need */
+    /**
+     * @throws InvalidMessageException when the XML is not a pacs.002.001.10 that the schema accepts, or not a
+     *                                 report on one transaction with every field we need
+     */
     public static Pacs002 parse(String xml) {
-        Iso20022Xml document = Iso20022Xml.parse(xml, NAMESPACE, "pacs.002");
+        FIToFIPaymentStatusReportV10 report = XML.read(xml).getFIToFIPmtStsRpt();
+        GroupHeader91 header = report.getGrpHdr();
+        OriginalGroupHeader17 original = XML.single(report.getOrgnlGrpInfAndSts(), ORIGINAL_GROUP);
+        PaymentTransaction110 transaction = XML.single(report.getTxInfAndSts(), TRANSACTION);
         try {
             return new Pacs002(
-                    document.required(REPORT + "GrpHdr/MsgId"),
-                    Fields.instant("CreDtTm", document.required(REPORT + "GrpHdr/CreDtTm")),
-                    document.required(REPORT + "OrgnlGrpInfAndSts/OrgnlMsgId"),
-                    document.required(REPORT + "TxInfAndSts/OrgnlEndToEndId"),
-                    document.required(REPORT + "TxInfAndSts/OrgnlTxId"),
-                    document.required(REPORT + "TxInfAndSts/OrgnlUETR"),
-                    TransactionStatus.fromCode(document.required(REPORT + "TxInfAndSts/TxSts")));
+                    header.getMsgId(),
+                    XmlDates.toInstant("CreDtTm", header.getCreDtTm()),
+                    original.getOrgnlMsgId(),
+                    XML.required(transaction.getOrgnlEndToEndId(), TRANSACTION + "/OrgnlEndToEndId"),
+                    XML.required(transaction.getOrgnlTxId(), TRANSACTION + "/OrgnlTxId"),
+                    XML.required(transaction.getOrgnlUETR(), TRANSACTION + "/OrgnlUETR"),
+                    TransactionStatus.fromCode(XML.required(transaction.getTxSts(), TRANSACTION + "/TxSts")));
         } catch (IllegalArgumentException e) {
-            throw new InvalidMessageException("Invalid pacs.002: " + e.getMessage(), e);
+            throw new InvalidMessageException("Invalid " + MESSAGE_NAME + ": " + e.getMessage(), e);
         }
     }
 }

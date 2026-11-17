@@ -1,14 +1,13 @@
 package dev.tkachuk.interbank.iso20022;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.regex.Pattern;
 
 /**
- * Field rules from the ISO 20022 data types the two messages use. Errors name the field and the rule but
- * never the value: names and IBANs are personal data and end up in logs.
+ * Field rules from the ISO 20022 data types the two messages use, checked when a record is built. The patterns
+ * are the XSDs' own; whatever else the schema requires, such as an amount's number of decimals, is checked
+ * when the message is written. Errors name the field and the rule but never the value: names and IBANs are
+ * personal data and end up in logs.
  */
 final class Fields {
 
@@ -19,7 +18,7 @@ final class Fields {
     /** UUIDv4Identifier: the UETR that follows one payment through every bank on its way. */
     private static final Pattern UETR =
             Pattern.compile("[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}");
-    /** ActiveOrHistoricCurrencyCode. */
+    /** ActiveCurrencyCode, the type of the settlement amount's Ccy. */
     private static final Pattern CURRENCY = Pattern.compile("[A-Z]{3}");
 
     private Fields() {
@@ -60,31 +59,6 @@ final class Fields {
     static void required(String field, Object value) {
         if (value == null) {
             throw new IllegalArgumentException(field + " is required");
-        }
-    }
-
-    /** ISODateTime with a zone, as both banks send it; a local time without one would be ambiguous. */
-    static Instant instant(String field, String value) {
-        try {
-            return Instant.parse(value);
-        } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException(field + " must be a date-time with a zone or offset", e);
-        }
-    }
-
-    static LocalDate date(String field, String value) {
-        try {
-            return LocalDate.parse(value);
-        } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException(field + " must be a date (yyyy-MM-dd)", e);
-        }
-    }
-
-    static BigDecimal decimal(String field, String value) {
-        try {
-            return new BigDecimal(value);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(field + " must be a decimal number", e);
         }
     }
 
