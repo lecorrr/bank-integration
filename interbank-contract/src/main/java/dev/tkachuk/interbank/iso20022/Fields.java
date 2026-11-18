@@ -56,6 +56,13 @@ final class Fields {
         }
     }
 
+    /** ExternalStatusReason1Code, why a payment has its status (AC04: the account is closed). Optional. */
+    static void reasonCode(String value) {
+        if (value != null) {
+            text("reasonCode", value, 4);
+        }
+    }
+
     static void required(String field, Object value) {
         if (value == null) {
             throw new IllegalArgumentException(field + " is required");

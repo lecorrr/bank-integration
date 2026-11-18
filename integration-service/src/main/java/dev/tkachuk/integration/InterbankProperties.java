@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Our bank, and the banks we can pay through the NBU's payment system (SEP). A Ukrainian IBAN names its bank by
  * the six-digit code after the check digits (UA84 399999 ...); ISO 20022 messages name banks by BIC. The NBU
- * publishes the full directory of participants; the demo knows one partner bank. Checked when the service
+ * publishes the full directory of participants; this project knows one, the partner bank. Checked when the service
  * starts, so a typo stops it there instead of at the first payment.
  *
  * @param bankCode     the code in our own IBANs

@@ -1,15 +1,15 @@
 # Architecture
 
 Three Maven modules: a shared contract and two Spring Boot 4.1 applications on Apache Camel 4.22. In version
-0.3.0, about 1,600 lines of main Java (comments included, generated classes not) and 1,450 lines of tests.
+0.4.0, about 1,550 lines of main Java (comments included, generated classes not) and 1,450 lines of tests.
 
 ## Modules
 
 | Module | Owns | May depend on |
 |---|---|---|
 | `interbank-contract` | The RabbitMQ topology (`InterbankTopology`) and the ISO 20022 messages: `Pacs008`, `Pacs002`, `TransactionStatus`, the official XSDs and the classes generated from them, safe XML reading | Spring AMQP's topology types and JAXB only: no Spring context, no connection |
-| `integration-service` | Our bank's side, by flow: `outgoing` (flow A: the events, `Pacs008Mapper`, the routes), `events` (the JSON of the Kafka events), `demo` (stands in for bank-core until step 3), and `InterbankProperties` (our bank and the directory of banks) | `interbank-contract`; `outgoing` and `events` never use `demo` |
-| `partner-bank-sim` | The other bank: `StatusReports` decides on each payment, its route answers | `interbank-contract` |
+| `integration-service` | Our bank's side, by flow: `outgoing` (flow A: the events, `Pacs008Mapper`, the routes), `events` (the JSON of the Kafka events), and `InterbankProperties` (our bank and the directory of banks) | `interbank-contract` |
+| `partner-bank-sim` | The other bank: `StatusReports` decides on each payment (refused if the payee's account is in `partner-bank.closed-accounts`, accepted otherwise), its route answers | `interbank-contract` |
 
 The two applications never depend on each other. Everything they share is in `interbank-contract`, the way
 bank-core's OpenAPI file is the contract between bank-core and its callers. The contract between bank-core and
@@ -18,12 +18,13 @@ integration-service is the two Kafka events below.
 ## Flow A: a payment to another bank
 
 ```
-bank-core (the demo until step 3) -> Kafka topic interbank.transfers, key: payer's IBAN -> TransferRequested
+bank-core's outbox -> Kafka topic interbank.transfers, key: payer's IBAN -> TransferRequested
   -> route transfer-to-pacs008 -> Pacs008Mapper -> exchange "interbank", routing key partner.pacs008
-  -> quorum queue partner.pacs008 -> partner-bank-sim route answer-pacs008 -> StatusReports: pacs.002 ACSC
+  -> quorum queue partner.pacs008 -> partner-bank-sim route answer-pacs008
+  -> StatusReports: pacs.002 ACSC, or RJCT with reason AC04 when the payee's account is closed
   -> exchange "interbank", routing key bank.pacs002 -> quorum queue bank.pacs002
-  -> route pacs002-to-status -> TransferStatusChanged SETTLED
-  -> Kafka topic interbank.transfer-statuses, key: transfer id -> bank-core (the demo's route until step 3)
+  -> route pacs002-to-status -> TransferStatusChanged SETTLED or REJECTED
+  -> Kafka topic interbank.transfer-statuses, key: transfer id -> bank-core's status listener
 ```
 
 ## The events
@@ -110,9 +111,17 @@ outside the directory, another currency, or a fraction of a kopiyka (rounding wo
   `/Document/FIToFICstmrCdtTrf/CdtTrfTxInf/DbtrAcct/Id/IBAN (cvc-pattern-valid, line 26)`, but not the value
   and not the validator's own exception, whose text does quote it: names and IBANs are personal data and end
   up in logs.
-- **The demo is a stand-in for bank-core, and nothing else knows it.** It publishes `TransferRequested` and
-  reads the statuses in a consumer group of its own, as bank-core will; `PaymentStatusStore` keeps the latest
-  1,000 in memory. Step 3 moves the status into bank-core's transfer, and the `demo` package goes away.
+- **A refusal's reason stays here for now.** `Pacs002` reads the first reason the other bank gives as an ISO
+  code (`StsRsnInf/Rsn/Cd`, such as AC04 for a closed account), and integration-service logs it. The status
+  event carries the outcome only, which is all bank-core acts on; a reason given in the bank's own words
+  (`Rsn/Prtry`) leaves the code empty rather than making the report invalid.
+- **Kafka confirms an event only once it is on disk.** Kafka normally leaves writing to disk to the operating
+  system and relies on copies on other brokers; with a single broker on a desktop, a power cut would lose
+  events it had already confirmed. compose sets `KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 1` for that reason; a bank's
+  cluster keeps the default and replicates every partition to three brokers instead.
+- **Time to stop cleanly.** compose gives integration-service 30 seconds to stop (`stop_grace_period`) rather
+  than Docker's 10: it finishes the message in hand and commits its Kafka offsets, so a restart does not send
+  the last payments again.
 - **Coverage is a gate, as in bank-core.** `verify` fails below 80 % line coverage per module, unit and
   integration tests together. The classes generated from the XSDs are left out: they are getters and setters
   for hundreds of elements this project never uses.

@@ -23,9 +23,43 @@ class Pacs002Test {
 
     @Test
     void readsBackEveryFieldItWrites() {
-        Pacs002 report = answer(TransactionStatus.RJCT);
+        Pacs002 report = answer(TransactionStatus.ACSC);
 
         assertThat(Pacs002.parse(report.toXml())).isEqualTo(report);
+    }
+
+    @Test
+    void aRejectionCarriesItsReasonThereAndBack() throws Exception {
+        Pacs002 report = Pacs002.rejecting(TestMessages.pacs008(), "AC04", "ANSWER-1", TestMessages.CREATED_AT);
+        String xml = report.toXml();
+
+        TestXml.validate(xml, Pacs002.MESSAGE_NAME);
+        assertThat(TestXml.text(xml, "FIToFIPmtStsRpt/TxInfAndSts/TxSts")).isEqualTo("RJCT");
+        assertThat(TestXml.text(xml, "FIToFIPmtStsRpt/TxInfAndSts/StsRsnInf/Rsn/Cd")).isEqualTo("AC04");
+        assertThat(Pacs002.parse(xml)).isEqualTo(report);
+    }
+
+    @Test
+    void aReasonInTheBanksOwnWordsLeavesNoCode() {
+        String xml = Pacs002.rejecting(TestMessages.pacs008(), "AC04", "ANSWER-1", TestMessages.CREATED_AT).toXml()
+                .replace("<Cd>AC04</Cd>", "<Prtry>Account closed</Prtry>");
+
+        Pacs002 report = Pacs002.parse(xml);
+
+        assertThat(report.status()).isEqualTo(TransactionStatus.RJCT);
+        assertThat(report.reasonCode()).isNull();
+    }
+
+    @Test
+    void aRejectionNeedsAReasonCodeOfOneToFourCharacters() {
+        Pacs008 payment = TestMessages.pacs008();
+
+        for (String reason : new String[] {null, "", "AC045"}) {
+            assertThatThrownBy(() -> Pacs002.rejecting(payment, reason, "ANSWER-1", TestMessages.CREATED_AT))
+                    .as("reason <%s>", reason)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("reasonCode");
+        }
     }
 
     @Test

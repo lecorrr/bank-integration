@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-/** The demo transfer, which tests change one field at a time. */
+/** A transfer from our customer to a customer of the partner bank, which tests change one field at a time. */
 public final class TestTransfers {
 
     public static final UUID TRANSFER_ID = UUID.fromString("0f5bd7c2-3a4e-4c1b-9d0e-6f2a8b1c3d4e");

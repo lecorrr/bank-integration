@@ -40,6 +40,7 @@ class TransferStatusChangedTest {
 
     private static Pacs002 reportWith(TransactionStatus status) {
         return new Pacs002("67a65fa611fe4db9bc67b8271c441990", REPORTED_AT, "0f5bd7c23a4e4c1b9d0e6f2a8b1c3d4e",
-                "NOTPROVIDED", "0f5bd7c23a4e4c1b9d0e6f2a8b1c3d4e", TestTransfers.TRANSFER_ID.toString(), status);
+                "NOTPROVIDED", "0f5bd7c23a4e4c1b9d0e6f2a8b1c3d4e", TestTransfers.TRANSFER_ID.toString(), status,
+                null);
     }
 }

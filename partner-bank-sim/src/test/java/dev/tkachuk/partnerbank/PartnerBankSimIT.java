@@ -57,6 +57,20 @@ class PartnerBankSimIT {
     }
 
     @Test
+    void refusesAPaymentToTheClosedAccountInItsConfiguration() {
+        Pacs008 payment = TestPayments.pacs008("MSG-IT-4", TestPayments.CLOSED_ACCOUNT);
+
+        rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, payment.toXml());
+
+        Message answer = rabbit.receive(BANK_PACS002, RECEIVE_TIMEOUT_MS);
+        assertThat(answer).as("a pacs.002 on queue " + BANK_PACS002).isNotNull();
+        Pacs002 report = Pacs002.parse(bodyOf(answer));
+        assertThat(report.originalMessageId()).isEqualTo("MSG-IT-4");
+        assertThat(report.status()).isEqualTo(TransactionStatus.RJCT);
+        assertThat(report.reasonCode()).isEqualTo("AC04");
+    }
+
+    @Test
     void answersEveryPaymentOnce() {
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, TestPayments.pacs008("MSG-IT-2").toXml());
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, TestPayments.pacs008("MSG-IT-3").toXml());

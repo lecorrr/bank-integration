@@ -6,12 +6,18 @@ import dev.tkachuk.interbank.iso20022.pacs002.GroupHeader91;
 import dev.tkachuk.interbank.iso20022.pacs002.ObjectFactory;
 import dev.tkachuk.interbank.iso20022.pacs002.OriginalGroupHeader17;
 import dev.tkachuk.interbank.iso20022.pacs002.PaymentTransaction110;
+import dev.tkachuk.interbank.iso20022.pacs002.StatusReason6Choice;
+import dev.tkachuk.interbank.iso20022.pacs002.StatusReasonInformation12;
 import java.time.Instant;
+import java.util.Objects;
 
 /**
  * The receiving bank's answer to one pacs.008: an ISO 20022 pacs.002.001.10 payment status report. It
  * repeats the original payment's ids, which is how the sending bank matches the answer to its payment. The XML
  * is written and read with the classes generated from the official XSD, package {@code pacs002}.
+ *
+ * @param reasonCode why the payment has this status, as an ISO code (TxInfAndSts/StsRsnInf/Rsn/Cd), such as
+ *                   AC04 for a closed account; null when the report gives none
  */
 public record Pacs002(
         String messageId,
@@ -20,7 +26,8 @@ public record Pacs002(
         String originalEndToEndId,
         String originalTransactionId,
         String originalUetr,
-        TransactionStatus status) {
+        TransactionStatus status,
+        String reasonCode) {
 
     public static final String NAMESPACE = "urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10";
     public static final String MESSAGE_NAME = "pacs.002.001.10";
@@ -38,12 +45,24 @@ public record Pacs002(
         Fields.max35("originalTransactionId", originalTransactionId);
         Fields.uetr(originalUetr);
         Fields.required("status", status);
+        Fields.reasonCode(reasonCode);
     }
 
-    /** The status report for one payment, carrying that payment's ids. */
+    /** The status report for one payment, carrying that payment's ids, with no reason given. */
     public static Pacs002 answering(Pacs008 payment, TransactionStatus status, String messageId, Instant createdAt) {
+        return report(payment, status, null, messageId, createdAt);
+    }
+
+    /** The refusal of one payment (RJCT), with the reason as an ISO code, such as AC04 for a closed account. */
+    public static Pacs002 rejecting(Pacs008 payment, String reasonCode, String messageId, Instant createdAt) {
+        Fields.required("reasonCode", reasonCode);
+        return report(payment, TransactionStatus.RJCT, reasonCode, messageId, createdAt);
+    }
+
+    private static Pacs002 report(Pacs008 payment, TransactionStatus status, String reasonCode, String messageId,
+            Instant createdAt) {
         return new Pacs002(messageId, createdAt, payment.messageId(), payment.endToEndId(),
-                payment.transactionId(), payment.uetr(), status);
+                payment.transactionId(), payment.uetr(), status, reasonCode);
     }
 
     public String toXml() {
@@ -60,6 +79,13 @@ public record Pacs002(
         transaction.setOrgnlTxId(originalTransactionId);
         transaction.setOrgnlUETR(originalUetr);
         transaction.setTxSts(status.name());
+        if (reasonCode != null) {
+            StatusReason6Choice reason = new StatusReason6Choice();
+            reason.setCd(reasonCode);
+            StatusReasonInformation12 reasonInformation = new StatusReasonInformation12();
+            reasonInformation.setRsn(reason);
+            transaction.getStsRsnInf().add(reasonInformation);
+        }
 
         FIToFIPaymentStatusReportV10 report = new FIToFIPaymentStatusReportV10();
         report.setGrpHdr(header);
@@ -87,9 +113,24 @@ public record Pacs002(
                     XML.required(transaction.getOrgnlEndToEndId(), TRANSACTION + "/OrgnlEndToEndId"),
                     XML.required(transaction.getOrgnlTxId(), TRANSACTION + "/OrgnlTxId"),
                     XML.required(transaction.getOrgnlUETR(), TRANSACTION + "/OrgnlUETR"),
-                    TransactionStatus.fromCode(XML.required(transaction.getTxSts(), TRANSACTION + "/TxSts")));
+                    TransactionStatus.fromCode(XML.required(transaction.getTxSts(), TRANSACTION + "/TxSts")),
+                    reasonCodeOf(transaction));
         } catch (IllegalArgumentException e) {
             throw new InvalidMessageException("Invalid " + MESSAGE_NAME + ": " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The first reason given as an ISO code. A bank may give its reasons in its own words (Rsn/Prtry) instead,
+     * or none at all; the report is still valid, it just has no code.
+     */
+    private static String reasonCodeOf(PaymentTransaction110 transaction) {
+        return transaction.getStsRsnInf().stream()
+                .map(StatusReasonInformation12::getRsn)
+                .filter(Objects::nonNull)
+                .map(StatusReason6Choice::getCd)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
     }
 }

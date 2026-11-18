@@ -4,11 +4,6 @@ import static dev.tkachuk.interbank.InterbankTopology.BANK_PACS002;
 import static dev.tkachuk.interbank.InterbankTopology.EXCHANGE;
 import static dev.tkachuk.interbank.InterbankTopology.PARTNER_PACS008;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.tkachuk.integration.outgoing.TransferRequested;
 import dev.tkachuk.integration.outgoing.TransferStatusChanged;
@@ -39,9 +34,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.kafka.KafkaContainer;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -51,16 +44,12 @@ import tools.jackson.databind.json.JsonMapper;
  * answers it. So this module is tested without bank-core and without partner-bank-sim.
  */
 @SpringBootTest
-@AutoConfigureMockMvc
 @Import({RabbitTestcontainer.class, KafkaTestcontainer.class})
 class TransferFlowIT {
 
     /** Generous: the first test also waits for the service's Kafka consumer to join its group. */
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
     private static final String OUR_CUSTOMER = "UA843999990000000000000000001";
-
-    @Autowired
-    private MockMvc mockMvc;
 
     @Autowired
     private RabbitTemplate rabbit;
@@ -82,19 +71,13 @@ class TransferFlowIT {
     @Test
     void aTransferGoesOutAsAPacs008AndItsAnswerComesBackAsAStatusEvent() throws Exception {
         UUID transferId = UUID.randomUUID();
-        publish(TransferRequested.TOPIC, OUR_CUSTOMER, """
-                {"transferId": "%s",
-                 "fromIban": "UA843999990000000000000000001", "fromName": "Artem Tkachuk",
-                 "toIban": "UA643888880000000000000000777", "toName": "Olena Kovalenko",
-                 "amount": 150.00, "currency": "UAH", "description": "Rent for November",
-                 "requestedAt": "2026-11-17T08:30:00Z"}
-                """.formatted(transferId));
+        requestTransfer(transferId);
 
         Pacs008 payment = takePacs008();
         assertThat(payment.uetr()).isEqualTo(transferId.toString());
         assertThat(payment.creditorAgentBic()).isEqualTo("PRTBUAUKXXX");
         assertThat(payment.amount()).isEqualByComparingTo("150.00");
-        answer(payment, TransactionStatus.ACSC);
+        answer(Pacs002.answering(payment, TransactionStatus.ACSC, newMessageId(), now()));
 
         Map<?, ?> status = nextEvent(TransferStatusChanged.TOPIC, transferId.toString());
         assertThat(status.get("transferId")).isEqualTo(transferId.toString());
@@ -102,28 +85,30 @@ class TransferFlowIT {
     }
 
     @Test
-    void theDemoTransferShowsThePartnerBanksAnswer() throws Exception {
-        String location = mockMvc.perform(post("/api/v1/demo/payments"))
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.status").value("REQUESTED"))
-                .andReturn().getResponse().getHeader("Location");
+    void aRefusalComesBackAsARejectedStatusEvent() throws Exception {
+        UUID transferId = UUID.randomUUID();
+        requestTransfer(transferId);
 
         Pacs008 payment = takePacs008();
-        assertThat(location).isEqualTo("/api/v1/demo/payments/" + payment.uetr());
-        answer(payment, TransactionStatus.ACSC);
+        Pacs002 refusal = Pacs002.rejecting(payment, "AC04", newMessageId(), now());
+        answer(refusal);
 
-        await().atMost(TIMEOUT).untilAsserted(() -> mockMvc.perform(get(location))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SETTLED")));
+        Map<?, ?> status = nextEvent(TransferStatusChanged.TOPIC, transferId.toString());
+        assertThat(status.get("status")).isEqualTo("REJECTED");
+        assertThat(status.get("reportId")).isEqualTo(refusal.messageId());
     }
 
-    @Test
-    void aTransferTheDemoNeverSawIsNotFound() throws Exception {
-        mockMvc.perform(get("/api/v1/demo/payments/" + UUID.randomUUID()))
-                .andExpect(status().isNotFound());
+    /** Publishes the transfer as bank-core does: its event as JSON text, keyed by the payer's IBAN. */
+    private void requestTransfer(UUID transferId) throws Exception {
+        publish(TransferRequested.TOPIC, OUR_CUSTOMER, """
+                {"transferId": "%s",
+                 "fromIban": "UA843999990000000000000000001", "fromName": "Artem Tkachuk",
+                 "toIban": "UA643888880000000000000000777", "toName": "Olena Kovalenko",
+                 "amount": 150.00, "currency": "UAH", "description": "Rent for November",
+                 "requestedAt": "2026-11-17T08:30:00Z"}
+                """.formatted(transferId));
     }
 
-    /** Publishes as bank-core does: the JSON as text, keyed by the payer's IBAN. */
     private void publish(String topic, String key, String json) throws Exception {
         Map<String, Object> config = Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
         try (KafkaProducer<String, String> producer =
@@ -162,10 +147,16 @@ class TransferFlowIT {
     }
 
     /** Answers as the partner bank does. */
-    private void answer(Pacs008 payment, TransactionStatus status) {
-        Pacs002 answer = Pacs002.answering(payment, status, UUID.randomUUID().toString().replace("-", ""),
-                Instant.now().truncatedTo(ChronoUnit.SECONDS));
-        rabbit.convertAndSend(EXCHANGE, BANK_PACS002, answer.toXml());
+    private void answer(Pacs002 report) {
+        rabbit.convertAndSend(EXCHANGE, BANK_PACS002, report.toXml());
+    }
+
+    private static String newMessageId() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private static Instant now() {
+        return Instant.now().truncatedTo(ChronoUnit.SECONDS);
     }
 
     /** Honours the encoding the sender declared; Camel declares the JVM's, which is UTF-8 since Java 18. */

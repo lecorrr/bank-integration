@@ -12,6 +12,12 @@ server:
   # 8080 is bank-core, 8082 integration-service.
   port: 8083
 
+partner-bank:
+  # Payments to these accounts are refused with a pacs.002 RJCT, reason AC04 (the account is closed), and
+  # bank-core gives the money back. Every other payment is accepted.
+  closed-accounts:
+    - UA843888880000000000000000999
+
 camel:
   component:
     spring-rabbitmq:

@@ -65,7 +65,12 @@ class OutgoingTransferRoutes extends RouteBuilder {
         Message message = exchange.getMessage();
         Pacs002 report = Pacs002.parse(message.getBody(String.class));
         TransferStatusChanged status = TransferStatusChanged.from(report);
-        log.info("Transfer {} is {} (pacs.002 {})", status.transferId(), status.status(), report.messageId());
+        if (report.reasonCode() == null) {
+            log.info("Transfer {} is {} (pacs.002 {})", status.transferId(), status.status(), report.messageId());
+        } else {
+            log.info("Transfer {} is {} (pacs.002 {}, reason {})", status.transferId(), status.status(),
+                    report.messageId(), report.reasonCode());
+        }
         message.removeHeaders("*");
         // Keyed by transfer, so the statuses of one transfer stay in order.
         message.setHeader(KafkaConstants.KEY, status.transferId().toString());

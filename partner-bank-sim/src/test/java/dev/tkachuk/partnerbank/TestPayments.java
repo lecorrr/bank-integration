@@ -8,10 +8,18 @@ import java.time.LocalDate;
 /** A valid incoming payment, as integration-service would send it. */
 final class TestPayments {
 
+    /** Closed at the partner bank in application.yml. */
+    static final String CLOSED_ACCOUNT = "UA843888880000000000000000999";
+    static final String OPEN_ACCOUNT = "UA643888880000000000000000777";
+
     private TestPayments() {
     }
 
     static Pacs008 pacs008(String messageId) {
+        return pacs008(messageId, OPEN_ACCOUNT);
+    }
+
+    static Pacs008 pacs008(String messageId, String creditorIban) {
         return new Pacs008(
                 messageId,
                 Instant.parse("2026-11-17T08:30:00Z"),
@@ -25,7 +33,7 @@ final class TestPayments {
                 "UA843999990000000000000000001",
                 "BNKCUAUKXXX",
                 "Olena Kovalenko",
-                "UA643888880000000000000000777",
+                creditorIban,
                 "PRTBUAUKXXX",
                 "Rent for November");
     }

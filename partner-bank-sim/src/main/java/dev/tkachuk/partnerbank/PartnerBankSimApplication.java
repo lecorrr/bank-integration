@@ -5,9 +5,11 @@ import java.time.Clock;
 import org.springframework.amqp.core.Declarables;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
 
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class PartnerBankSimApplication {
 
     public static void main(String[] args) {

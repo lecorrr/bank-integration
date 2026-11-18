@@ -15,7 +15,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class TransferRequestedTest {
 
     @Test
-    void acceptsTheDemoTransfer() {
+    void acceptsAValidTransfer() {
         assertThat(TestTransfers.transfer().transferId()).isEqualTo(TestTransfers.TRANSFER_ID);
     }
 

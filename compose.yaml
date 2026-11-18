@@ -64,8 +64,11 @@ services:
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
       # Inside the container: docker compose stop keeps the events, docker compose down empties Kafka. A demo
-      # stack needs no more; bank-core's outbox (step 3) keeps what it has not published yet.
+      # stack needs no more; bank-core's outbox keeps what it has not published yet.
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      # Every message goes to disk before Kafka confirms it. One broker has no copy elsewhere, so without this
+      # a power cut could lose events Kafka had already confirmed.
+      KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 1
     mem_limit: 512m
 
   sftp:
@@ -91,6 +94,9 @@ services:
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
     ports:
       - "127.0.0.1:8082:8082"
+    # Stopping takes about 8 s (Camel finishes the message in hand, the Kafka consumer commits its offsets);
+    # Docker's default 10 s is too close, and a killed service sends its last payments again on restart.
+    stop_grace_period: 30s
     mem_limit: 768m
 
   partner-bank-sim:
