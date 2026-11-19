@@ -26,8 +26,12 @@ class InterbankTopologyTest {
     void everyQueueIsADurableQuorumQueue() {
         List<Queue> queues = topology.getDeclarablesByType(Queue.class);
 
-        assertThat(queues).extracting(Queue::getName)
-                .containsExactlyInAnyOrder(InterbankTopology.PARTNER_PACS008, InterbankTopology.BANK_PACS002);
+        assertThat(queues).extracting(Queue::getName).containsExactlyInAnyOrder(
+                InterbankTopology.PARTNER_PACS008, InterbankTopology.PARTNER_PACS028, InterbankTopology.BANK_PACS002,
+                InterbankTopology.BANK_PACS002_DLQ, InterbankTopology.BANK_PACS008, InterbankTopology.BANK_PACS028,
+                InterbankTopology.PARTNER_PACS002, InterbankTopology.BANK_PACS008_DLQ,
+                InterbankTopology.BANK_PACS028_DLQ);
+        assertThat(queues).extracting(Queue::getName).containsExactlyElementsOf(InterbankTopology.queues());
         assertThat(queues).allSatisfy(queue -> {
             assertThat(queue.isDurable()).isTrue();
             assertThat(queue.getArguments()).containsEntry("x-queue-type", "quorum");
@@ -35,10 +39,20 @@ class InterbankTopologyTest {
     }
 
     @Test
+    void everyDeadLetterQueueBelongsToAQueueOfTheSameBank() {
+        for (String queue : InterbankTopology.queues()) {
+            if (queue.endsWith(".dlq")) {
+                assertThat(InterbankTopology.queues()).as("the queue %s is the dead letters of", queue)
+                        .contains(queue.substring(0, queue.length() - ".dlq".length()));
+            }
+        }
+    }
+
+    @Test
     void everyQueueIsBoundToTheExchangeByItsOwnName() {
         List<Binding> bindings = topology.getDeclarablesByType(Binding.class);
 
-        assertThat(bindings).hasSize(2);
+        assertThat(bindings).hasSize(InterbankTopology.queues().size());
         assertThat(bindings).allSatisfy(binding -> {
             assertThat(binding.getExchange()).isEqualTo(InterbankTopology.EXCHANGE);
             assertThat(binding.getRoutingKey()).isEqualTo(binding.getDestination());

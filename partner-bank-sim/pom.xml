@@ -7,19 +7,19 @@
     <parent>
         <groupId>dev.tkachuk</groupId>
         <artifactId>bank-integration</artifactId>
-        <version>0.4.0</version>
+        <version>0.6.1</version>
     </parent>
 
     <artifactId>partner-bank-sim</artifactId>
     <name>partner-bank-sim</name>
-    <description>Plays the other bank: answers pacs.008 with pacs.002 (and later sends payments, SOAP and SFTP)</description>
+    <description>Plays the other bank: answers pacs.008 and pacs.028 with pacs.002, and sends payments of its own (later SOAP and SFTP)</description>
 
     <dependencies>
         <dependency>
             <groupId>dev.tkachuk</groupId>
             <artifactId>interbank-contract</artifactId>
         </dependency>
-        <!-- Only for the actuator health endpoint; the simulator talks to bank-integration over RabbitMQ. -->
+        <!-- The payments API (PaymentsController) and the actuator health endpoint; the messages go over RabbitMQ. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
@@ -44,6 +44,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -22,6 +22,49 @@ class Pacs002Test {
     }
 
     @Test
+    void answersARequestAboutAPaymentNeverReceivedWithAg09AndTheRequestsIds() throws Exception {
+        Pacs028 request = TestMessages.pacs028();
+
+        Pacs002 report = Pacs002.notReceived(request, "ANSWER-1", TestMessages.CREATED_AT);
+
+        assertThat(report.status()).isEqualTo(TransactionStatus.RJCT);
+        assertThat(report.reasonCode()).isEqualTo(StatusReason.PAYMENT_NOT_RECEIVED);
+        assertThat(report.originalMessageId()).isEqualTo(request.originalMessageId());
+        assertThat(report.originalEndToEndId()).isEqualTo(request.originalEndToEndId());
+        assertThat(report.originalTransactionId()).isEqualTo(request.originalTransactionId());
+        assertThat(report.originalUetr()).isEqualTo(request.originalUetr());
+        TestXml.validate(report.toXml(), Pacs002.MESSAGE_NAME);
+    }
+
+    @Test
+    void refusesTheMessageARequestAsksAboutWithTheRequestsIds() throws Exception {
+        Pacs028 request = TestMessages.pacs028();
+
+        Pacs002 report = Pacs002.rejecting(request, StatusReason.DUPLICATION, "ANSWER-1", TestMessages.CREATED_AT);
+
+        assertThat(report.status()).isEqualTo(TransactionStatus.RJCT);
+        assertThat(report.reasonCode()).isEqualTo(StatusReason.DUPLICATION);
+        assertThat(report.originalMessageId()).isEqualTo(request.originalMessageId());
+        assertThat(report.originalUetr()).isEqualTo(request.originalUetr());
+        TestXml.validate(report.toXml(), Pacs002.MESSAGE_NAME);
+        assertThatThrownBy(() -> Pacs002.rejecting(request, null, "ANSWER-1", TestMessages.CREATED_AT))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reasonCode");
+    }
+
+    @Test
+    void repeatsAnAnswerUnderANewIdAndTime() {
+        Pacs002 first = Pacs002.rejecting(TestMessages.pacs008(), "AC04", "ANSWER-1", TestMessages.CREATED_AT);
+
+        Pacs002 again = first.repeat("ANSWER-2", TestMessages.CREATED_AT.plusSeconds(90));
+
+        assertThat(again.messageId()).isEqualTo("ANSWER-2");
+        assertThat(again.createdAt()).isEqualTo(TestMessages.CREATED_AT.plusSeconds(90));
+        // Everything else is the same answer: given back the first id and time, it is the first report.
+        assertThat(again.repeat(first.messageId(), first.createdAt())).isEqualTo(first);
+    }
+
+    @Test
     void readsBackEveryFieldItWrites() {
         Pacs002 report = answer(TransactionStatus.ACSC);
 

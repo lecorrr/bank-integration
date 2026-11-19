@@ -12,16 +12,23 @@ import org.junit.jupiter.params.provider.ValueSource;
 class PartnerBankPropertiesTest {
 
     @Test
-    void refusesPaymentsToItsClosedAccountsOnly() {
-        PartnerBankProperties properties = new PartnerBankProperties(List.of(TestPayments.CLOSED_ACCOUNT));
+    void knowsItsClosedAndItsSilentAccounts() {
+        PartnerBankProperties properties =
+                new PartnerBankProperties(List.of(TestPayments.CLOSED_ACCOUNT), List.of(TestPayments.SILENT_ACCOUNT));
 
         assertThat(properties.isClosed(TestPayments.CLOSED_ACCOUNT)).isTrue();
+        assertThat(properties.isSilent(TestPayments.SILENT_ACCOUNT)).isTrue();
         assertThat(properties.isClosed(TestPayments.OPEN_ACCOUNT)).isFalse();
+        assertThat(properties.isSilent(TestPayments.OPEN_ACCOUNT)).isFalse();
+        assertThat(properties.isSilent(TestPayments.CLOSED_ACCOUNT)).isFalse();
     }
 
     @Test
-    void noListMeansEveryAccountIsOpen() {
-        assertThat(new PartnerBankProperties(null).isClosed(TestPayments.CLOSED_ACCOUNT)).isFalse();
+    void noListsMeanEveryAccountIsOpenAndAnswered() {
+        PartnerBankProperties properties = new PartnerBankProperties(null, null);
+
+        assertThat(properties.isClosed(TestPayments.CLOSED_ACCOUNT)).isFalse();
+        assertThat(properties.isSilent(TestPayments.SILENT_ACCOUNT)).isFalse();
     }
 
     @ParameterizedTest
@@ -32,15 +39,28 @@ class PartnerBankPropertiesTest {
             "UA84",
             ""})
     void refusesAnythingButAnIbanInCapitalsWithoutSpaces(String iban) {
-        assertThatThrownBy(() -> new PartnerBankProperties(List.of(TestPayments.OPEN_ACCOUNT, iban)))
+        assertThatThrownBy(() -> new PartnerBankProperties(List.of(TestPayments.OPEN_ACCOUNT, iban), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("partner-bank.closed-accounts[1]");
+        assertThatThrownBy(() -> new PartnerBankProperties(null, List.of(iban)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("partner-bank.silent-accounts[0]");
     }
 
     @Test
     void refusesAnEmptyLineInTheList() {
-        assertThatThrownBy(() -> new PartnerBankProperties(Arrays.asList((String) null)))
+        assertThatThrownBy(() -> new PartnerBankProperties(Arrays.asList((String) null), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("partner-bank.closed-accounts[0]");
+    }
+
+    @Test
+    void refusesAnAccountThatIsBothClosedAndSilent() {
+        List<String> closed = List.of(TestPayments.CLOSED_ACCOUNT);
+        List<String> silent = List.of(TestPayments.SILENT_ACCOUNT, TestPayments.CLOSED_ACCOUNT);
+
+        assertThatThrownBy(() -> new PartnerBankProperties(closed, silent))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("partner-bank.silent-accounts[1]");
     }
 }

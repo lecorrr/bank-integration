@@ -22,6 +22,34 @@ class InterbankPropertiesTest {
         assertThat(bank.participantBic("300001")).isEmpty();
     }
 
+    @Test
+    void knowsItsOwnAccountsByTheBankCodeInTheIban() {
+        InterbankProperties bank = new InterbankProperties("399999", "BNKCUAUKXXX", PARTNER);
+
+        assertThat(bank.isOurAccount("UA843999990000000000000000001")).isTrue();
+        assertThat(bank.isOurAccount("UA643888880000000000000000777")).isFalse();
+        assertThat(bank.isOurAccount("DE89370400440532013000")).isFalse();
+        assertThat(bank.isOurAccount(null)).isFalse();
+    }
+
+    @Test
+    void knowsWhichParticipantKeepsAnAccount() {
+        InterbankProperties bank = new InterbankProperties("399999", "BNKCUAUKXXX", PARTNER);
+
+        assertThat(bank.isParticipantAccount("UA643888880000000000000000777", "PRTBUAUKXXX")).isTrue();
+        assertThat(bank.isParticipantAccount("UA643888880000000000000000777", "OTHRUAUKXXX")).isFalse();
+        assertThat(bank.isParticipantAccount("UA483777770000000000000000123", "PRTBUAUKXXX")).isFalse();
+        assertThat(bank.isParticipantAccount("UA843999990000000000000000001", "BNKCUAUKXXX")).isFalse();
+    }
+
+    @Test
+    void readsTheBankCodeOfAUkrainianIbanOnly() {
+        assertThat(InterbankProperties.bankCodeOf("UA843999990000000000000000001")).hasValue("399999");
+        assertThat(InterbankProperties.bankCodeOf("UA84399999000000000000000000")).as("one character short")
+                .isEmpty();
+        assertThat(InterbankProperties.bankCodeOf("DE89370400440532013000")).isEmpty();
+    }
+
     static Stream<Arguments> wrongSettings() {
         return Stream.of(
                 Arguments.of("a five-digit bank code", "39999", "BNKCUAUKXXX", PARTNER, "interbank.bank-code"),

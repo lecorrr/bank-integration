@@ -16,6 +16,11 @@ final class TestMessages {
         return pacs008("Olena Kovalenko");
     }
 
+    /** Our bank asks the partner bank about that payment a minute after sending it. */
+    static Pacs028 pacs028() {
+        return Pacs028.about(pacs008(), "STATUS-REQUEST-1", CREATED_AT.plusSeconds(60));
+    }
+
     static Pacs008 pacs008(String creditorName) {
         return new Pacs008(
                 "5f0c1e3a9b2d4e6f8a1b3c5d7e9f0a1b",

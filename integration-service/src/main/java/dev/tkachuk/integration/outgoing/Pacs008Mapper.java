@@ -31,16 +31,14 @@ import org.springframework.stereotype.Component;
  * </pre>
  *
  * Every id comes from the transfer id, so the same transfer always gives a message with the same ids: a
- * redelivered event repeats a payment's MsgId instead of starting a second payment, and step 4 drops it as a
- * duplicate. The pacs.002 names the payment by the same UETR, so its answer finds the transfer without a lookup.
+ * redelivered event finds its payment stored under the transfer id, and a payment sent again repeats its MsgId,
+ * by which the other bank drops the copy. The pacs.002 names the payment by that MsgId and the UETR.
  */
 @Component
 class Pacs008Mapper {
 
     /** ISO 20022's word for an end-to-end id the payer did not give; bank-core's API asks for none. */
     static final String NOT_PROVIDED = "NOTPROVIDED";
-    /** The NBU's payment system settles hryvnia only. */
-    private static final String HRYVNIA = "UAH";
     /** The business day follows Kyiv time: a payment at 01:00 Kyiv time settles on the Kyiv date. */
     private static final ZoneId BANK_ZONE = ZoneId.of("Europe/Kyiv");
 
@@ -56,12 +54,12 @@ class Pacs008Mapper {
     Pacs008 toPacs008(TransferRequested transfer) {
         requireFromOurBank(transfer);
         String creditorAgentBic = creditorAgentBicOf(transfer);
-        if (!HRYVNIA.equals(transfer.currency())) {
-            throw new TransferRefusedException(transfer.transferId(),
-                    "the currency is " + transfer.currency() + ", and SEP settles " + HRYVNIA + " only");
+        if (!InterbankProperties.SETTLEMENT_CURRENCY.equals(transfer.currency())) {
+            throw new TransferRefusedException(transfer.transferId(), "the currency is " + transfer.currency()
+                    + ", and SEP settles " + InterbankProperties.SETTLEMENT_CURRENCY + " only");
         }
         Instant now = clock.instant().truncatedTo(ChronoUnit.SECONDS);
-        String id = withoutHyphens(transfer.transferId());
+        String id = messageIdOf(transfer.transferId());
         return new Pacs008(
                 id,
                 now,
@@ -69,7 +67,7 @@ class Pacs008Mapper {
                 id,
                 transfer.transferId().toString(),
                 inKopiyky(transfer),
-                HRYVNIA,
+                InterbankProperties.SETTLEMENT_CURRENCY,
                 LocalDate.ofInstant(now, BANK_ZONE),
                 transfer.fromName(),
                 transfer.fromIban(),
@@ -108,13 +106,16 @@ class Pacs008Mapper {
         }
     }
 
-    /** The six digits after "UA" and the check digits name the bank (TransferRequested checked the format). */
+    /** TransferRequested checked that both IBANs are Ukrainian, so each has a bank code. */
     private static String bankCodeOf(String ukrainianIban) {
-        return ukrainianIban.substring(4, 10);
+        return InterbankProperties.bankCodeOf(ukrainianIban).orElseThrow();
     }
 
-    /** 32 hex characters: within ISO 20022's 35-character limit for ids, where the 36 of a UUID are not. */
-    private static String withoutHyphens(UUID id) {
-        return id.toString().replace("-", "");
+    /**
+     * The transfer's MsgId, which is also its TxId: the transfer id without hyphens, 32 hex characters, within
+     * ISO 20022's 35-character limit for ids, where the 36 of a UUID are not.
+     */
+    static String messageIdOf(UUID transferId) {
+        return transferId.toString().replace("-", "");
     }
 }

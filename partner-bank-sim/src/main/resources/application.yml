@@ -14,9 +14,21 @@ server:
 
 partner-bank:
   # Payments to these accounts are refused with a pacs.002 RJCT, reason AC04 (the account is closed), and
-  # bank-core gives the money back. Every other payment is accepted.
+  # bank-core gives the money back.
   closed-accounts:
     - UA843888880000000000000000999
+  # Payments to these accounts are received and never decided, as if the answer were lost: integration-service
+  # asks about them with pacs.028 status requests, and the answer is PDNG (pending) every time.
+  silent-accounts:
+    - UA443888880000000000000000555
+  # Every other payment is accepted.
+  # The bank as a payer: its payments to bank-core's customers, sent over HTTP (POST /api/payments).
+  sending:
+    bic: PRTBUAUKXXX
+    customer-iban: UA643888880000000000000000777
+    customer-name: Olena Kovalenko
+    # bank-core's bank, the payee's bank of every payment this bank sends.
+    payee-bank-bic: BNKCUAUKXXX
 
 camel:
   component:

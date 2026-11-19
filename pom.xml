@@ -14,7 +14,7 @@
 
     <groupId>dev.tkachuk</groupId>
     <artifactId>bank-integration</artifactId>
-    <version>0.4.0</version>
+    <version>0.6.1</version>
     <packaging>pom</packaging>
     <name>bank-integration</name>
     <description>Moves bank-core's payments to other banks as ISO 20022 messages over RabbitMQ and Kafka</description>
@@ -33,9 +33,10 @@
         <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
         <!-- The Kafka client Camel 4.22 is built with; Spring Boot 4.1.2 would otherwise pick 4.2.2. -->
         <kafka.version>4.3.1</kafka.version>
-        <!-- One RabbitMQ and one Kafka image for the integration tests; compose.yaml uses the same tags. -->
+        <!-- One image each for the integration tests; compose.yaml uses the same tags. -->
         <rabbitmq.image>rabbitmq:4.3-management-alpine</rabbitmq.image>
         <kafka.image>apache/kafka-native:4.4.0</kafka.image>
+        <postgres.image>postgres:17-alpine</postgres.image>
         <jacoco.version>0.8.13</jacoco.version>
         <!-- Line coverage every module must reach, unit and integration tests together; generated code excluded. -->
         <coverage.minimum>0.80</coverage.minimum>
@@ -73,6 +74,7 @@
                         <systemPropertyVariables>
                             <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
                             <kafka.image>${kafka.image}</kafka.image>
+                            <postgres.image>${postgres.image}</postgres.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
@@ -83,6 +85,7 @@
                         <systemPropertyVariables>
                             <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
                             <kafka.image>${kafka.image}</kafka.image>
+                            <postgres.image>${postgres.image}</postgres.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>

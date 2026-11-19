@@ -2,7 +2,10 @@ package dev.tkachuk.interbank.iso20022;
 
 import java.util.Arrays;
 
-/** The ISO 20022 transaction status codes (TxSts) this project uses, a subset of ExternalPaymentTransactionStatus1Code. */
+/**
+ * The ISO 20022 transaction status codes (TxSts) this project uses, a subset of
+ * ExternalPaymentTransactionStatus1Code.
+ */
 public enum TransactionStatus {
 
     /** AcceptedSettlementCompleted: the money reached the creditor's bank. */

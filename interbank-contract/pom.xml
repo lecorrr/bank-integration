@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.tkachuk</groupId>
         <artifactId>bank-integration</artifactId>
-        <version>0.4.0</version>
+        <version>0.6.1</version>
     </parent>
 
     <artifactId>interbank-contract</artifactId>
@@ -41,15 +41,15 @@
     <build>
         <plugins>
             <!-- Generates the message classes from the official ISO 20022 schemas in src/main/resources/xsd, into
-                 target/generated-sources. One package per message, because both schemas define types with the
-                 same names (GroupHeader, Document and so on). -->
+                 target/generated-sources. One package per message, because the schemas define types with the
+                 same names (GroupHeader91, Document and so on). -->
             <plugin>
                 <groupId>org.jvnet.jaxb</groupId>
                 <artifactId>jaxb-maven-plugin</artifactId>
                 <version>${jaxb-maven-plugin.version}</version>
                 <configuration>
                     <schemaDirectory>src/main/resources/xsd</schemaDirectory>
-                    <!-- No episode file: nothing compiles other schemas against these, and both executions
+                    <!-- No episode file: nothing compiles other schemas against these, and every execution
                          would write the same META-INF/sun-jaxb.episode into the jar. -->
                     <episode>false</episode>
                 </configuration>
@@ -78,6 +78,19 @@
                             </schemaIncludes>
                             <generatePackage>dev.tkachuk.interbank.iso20022.pacs002</generatePackage>
                             <generateDirectory>${project.build.directory}/generated-sources/pacs002</generateDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>pacs028</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <schemaIncludes>
+                                <include>pacs.028.001.03.xsd</include>
+                            </schemaIncludes>
+                            <generatePackage>dev.tkachuk.interbank.iso20022.pacs028</generatePackage>
+                            <generateDirectory>${project.build.directory}/generated-sources/pacs028</generateDirectory>
                         </configuration>
                     </execution>
                 </executions>

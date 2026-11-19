@@ -83,19 +83,23 @@ services:
     build: ./integration-service
     image: integration-service:local
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       kafka:
         condition: service_started
     environment:
+      DB_URL: jdbc:postgresql://postgres:5432/integration
       RABBITMQ_HOST: rabbitmq
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       # JSON logs in Elastic Common Schema, ready for ELK in Project 3.
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
     ports:
       - "127.0.0.1:8082:8082"
-    # Stopping takes about 8 s (Camel finishes the message in hand, the Kafka consumer commits its offsets);
-    # Docker's default 10 s is too close, and a killed service sends its last payments again on restart.
+    # Stopping takes a few seconds: Camel finishes the messages in hand. A service killed before that loses
+    # nothing either, since an event is committed only once its payment is stored and sent; it just sends the
+    # payment in hand again after the restart, which the partner bank answers as before.
     stop_grace_period: 30s
     mem_limit: 768m
 

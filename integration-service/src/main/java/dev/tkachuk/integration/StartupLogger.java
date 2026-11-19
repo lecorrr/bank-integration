@@ -24,7 +24,8 @@ class StartupLogger {
     void logVersion() {
         BuildProperties build = buildProperties.getIfAvailable();
         if (build == null) {
-            log.warn("integration-service started, version unknown: build-info.properties is missing (run mvn package)");
+            log.warn("integration-service started, version unknown: build-info.properties is missing "
+                    + "(run mvn package)");
         } else {
             log.info("integration-service {} started", build.getVersion());
         }

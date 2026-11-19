@@ -17,7 +17,8 @@ class SchemaFilesTest {
     @ParameterizedTest(name = "{0}")
     @CsvSource({
             "pacs.008.001.08, cf048155f70cacd03f1f1dfadf66cba8752be93c249c267351782fd6adb023f7",
-            "pacs.002.001.10, d14da6304db5178b1afc7d8ed6cc6073e6e1a143fc79d9ba66d3246d4a654e90"})
+            "pacs.002.001.10, d14da6304db5178b1afc7d8ed6cc6073e6e1a143fc79d9ba66d3246d4a654e90",
+            "pacs.028.001.03, b683ae636887af4ff9d71e05b95e9a27aa54b96b4cb6d1858adc2e8d23b17499"})
     void isTheOfficialFile(String messageName, String sha256) throws Exception {
         try (InputStream xsd = SchemaFilesTest.class.getResourceAsStream("/xsd/" + messageName + ".xsd")) {
             assertThat(xsd).isNotNull();
