@@ -13,25 +13,10 @@ import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.springframework.stereotype.Component;
 
-/**
- * Flow B, second leg: bank-core's decision on a payment from the partner bank comes from Kafka, becomes our answer,
- * and goes to the partner bank as a pacs.002: ACSC for a payment credited, RJCT with an ISO reason code for one
- * refused (IncomingTransferDecided says which).
- *
- * <p>At least once, and a repeat is harmless. The answer is stored, then sent, then the event's offset committed
- * (Routes.fromKafka). A crash in between brings the decision again, and the stored answer goes out again: the same
- * pacs.002, which the partner bank can drop as a copy by its MsgId. bank-core sends its decision again too, when
- * a payment comes to it twice; that is answered the same way. A step that fails is retried in rounds
- * (Routes.retryInRounds) until it works.
- *
- * <p>A decision that cannot be acted on goes to the dead-letter topic as it came, for a person to look at: one that
- * is not a valid IncomingTransferDecided, one about a payment we never received, and one that contradicts the
- * answer we gave already.
- */
+/** Flow B: bank-core's decision becomes our pacs.002 answer, stored before it goes out. */
 @Component
 class DecisionRoute extends RouteBuilder {
 
-    /** Where a decision that cannot be acted on goes, as it came; Spring Kafka's naming. */
     static final String DEAD_LETTER_TOPIC = IncomingTransferDecided.TOPIC + ".DLT";
 
     private final IncomingPayments payments;
@@ -64,13 +49,12 @@ class DecisionRoute extends RouteBuilder {
                 .process(Routes::commitOffset);
     }
 
-    /** Records the decision as our answer, unless the payment has one, and makes the message in hand that answer. */
     private void answer(Exchange exchange) {
         IncomingTransferDecided decision =
                 json.read(exchange.getMessage().getBody(String.class), IncomingTransferDecided.class);
         IncomingPayment payment = payments.find(decision.uetr()).orElseThrow(() -> new UnusableMessageException(
-                "bank-core decided " + decision.decision() + " on payment " + decision.uetr()
-                        + ", which this service never received"));
+                "Decision " + decision.decision() + " for payment " + decision.uetr()
+                        + ", which was never received"));
         boolean first = false;
         if (!payment.answered()) {
             Instant now = clock.instant().truncatedTo(ChronoUnit.SECONDS);
@@ -79,16 +63,16 @@ class DecisionRoute extends RouteBuilder {
             payment = payments.find(decision.uetr()).orElseThrow();
         }
         if (!payment.answers(decision)) {
-            throw new UnusableMessageException("bank-core decided " + decision.decision() + " on payment "
-                    + payment.uetr() + " as transfer " + decision.transferId() + ", which we answered "
-                    + payment.outcome() + " already (pacs.002 " + payment.reportId() + ")");
+            throw new UnusableMessageException("Decision " + decision.decision() + " for payment " + payment.uetr()
+                    + " (transfer " + decision.transferId() + ") conflicts with our answer " + payment.outcome()
+                    + " (pacs.002 " + payment.reportId() + ")");
         }
         if (first) {
-            log.info("Payment {} (pacs.008 {}): bank-core {} it as transfer {}; answering pacs.002 {} {}",
+            log.info("Payment {} (pacs.008 {}) {} by bank-core as transfer {}, sending pacs.002 {} {}",
                     payment.uetr(), payment.messageId(), decision.decision(), decision.transferId(),
                     payment.reportId(), payment.outcome());
         } else {
-            log.info("Payment {}: bank-core's decision came again; sending pacs.002 {} {} again", payment.uetr(),
+            log.info("Payment {}: repeated decision, resending pacs.002 {} {}", payment.uetr(),
                     payment.reportId(), payment.outcome());
         }
         Pacs002 answer = payment.answer();
@@ -97,7 +81,6 @@ class DecisionRoute extends RouteBuilder {
 
     private void toDeadLetter(Exchange exchange) {
         String origin = Routes.asKafkaDeadLetter(exchange);
-        log.error("The event at {} cannot be acted on; it goes to {} for a person to look at: {}", origin,
-                DEAD_LETTER_TOPIC, Routes.failureOf(exchange));
+        log.error("Moving event {} to {}: {}", origin, DEAD_LETTER_TOPIC, Routes.failureOf(exchange));
     }
 }

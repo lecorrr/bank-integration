@@ -14,7 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class XmlDatesTest {
 
     @Test
-    void keepsEveryDigitOfAnInstant() {
+    void shouldKeepEveryDigitOfInstant() {
         Instant instant = Instant.parse("2026-11-17T08:30:00.123456789Z");
 
         assertThat(XmlDates.toXml(instant).toXMLFormat()).isEqualTo("2026-11-17T08:30:00.123456789Z");
@@ -22,13 +22,13 @@ class XmlDatesTest {
     }
 
     @Test
-    void readsADateTimeWithAnOffsetAsTheSameInstant() {
+    void shouldReadOffsetDateTimeAsSameInstant() {
         assertThat(XmlDates.toInstant("CreDtTm", xml("2026-11-17T10:30:00+02:00")))
                 .isEqualTo(Instant.parse("2026-11-17T08:30:00Z"));
     }
 
     @Test
-    void refusesADateTimeWithoutAZone() {
+    void shouldRejectDateTimeWithoutZone() {
         assertThatThrownBy(() -> XmlDates.toInstant("CreDtTm", xml("2026-11-17T08:30:00")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("CreDtTm must be a date-time with a zone or offset");
@@ -36,7 +36,7 @@ class XmlDatesTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"2026-11-17", "2026-11-17Z", "2026-11-17+02:00"})
-    void readsTheBusinessDayOfADateWithOrWithoutAZone(String date) {
+    void shouldReadDateWithOrWithoutZone(String date) {
         assertThat(XmlDates.toLocalDate("IntrBkSttlmDt", xml(date))).isEqualTo(LocalDate.parse("2026-11-17"));
     }
 

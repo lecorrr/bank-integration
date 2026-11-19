@@ -3,7 +3,7 @@ target/
 *.log
 logs/
 
-# Maven wrapper downloads (the wrapper scripts and .mvn/wrapper/maven-wrapper.properties are committed)
+# Downloaded by mvnw
 .mvn/wrapper/maven-wrapper.jar
 
 # IDEs

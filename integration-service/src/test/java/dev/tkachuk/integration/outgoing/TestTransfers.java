@@ -4,11 +4,10 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-/** A transfer from our customer to a customer of the partner bank, which tests change one field at a time. */
+/** A valid transfer event from bank-core; tests change one field at a time. */
 public final class TestTransfers {
 
     public static final UUID TRANSFER_ID = UUID.fromString("0f5bd7c2-3a4e-4c1b-9d0e-6f2a8b1c3d4e");
-    /** At our bank (code 399999) and at the partner bank (388888); both are valid IBANs. */
     public static final String OUR_CUSTOMER = "UA843999990000000000000000001";
     public static final String PARTNER_CUSTOMER = "UA643888880000000000000000777";
 

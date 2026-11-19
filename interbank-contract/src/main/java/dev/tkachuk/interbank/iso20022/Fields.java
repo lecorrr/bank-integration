@@ -3,33 +3,22 @@ package dev.tkachuk.interbank.iso20022;
 import java.math.BigDecimal;
 import java.util.regex.Pattern;
 
-/**
- * Field rules from the ISO 20022 data types the two messages use, checked when a record is built. The patterns
- * are the XSDs' own; whatever else the schema requires, such as an amount's number of decimals, is checked
- * when the message is written. Errors name the field and the rule but never the value: names and IBANs are
- * personal data and end up in logs.
- */
+/** Field checks shared by the message records. They mirror the XSD rules. */
 final class Fields {
 
-    /** IBAN2007Identifier. */
     private static final Pattern IBAN = Pattern.compile("[A-Z]{2}[0-9]{2}[a-zA-Z0-9]{1,30}");
-    /** BICFIDec2014Identifier. */
     private static final Pattern BIC = Pattern.compile("[A-Z0-9]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?");
-    /** UUIDv4Identifier: the UETR that follows one payment through every bank on its way. */
     private static final Pattern UETR =
             Pattern.compile("[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}");
-    /** ActiveCurrencyCode, the type of the settlement amount's Ccy. */
     private static final Pattern CURRENCY = Pattern.compile("[A-Z]{3}");
 
     private Fields() {
     }
 
-    /** Max35Text: message and transaction ids. */
     static void max35(String field, String value) {
         text(field, value, 35);
     }
 
-    /** Max140Text: names and remittance information. */
     static void max140(String field, String value) {
         text(field, value, 140);
     }
@@ -56,7 +45,6 @@ final class Fields {
         }
     }
 
-    /** ExternalStatusReason1Code, why a payment has its status (AC04: the account is closed). Optional. */
     static void reasonCode(String value) {
         if (value != null) {
             text("reasonCode", value, 4);

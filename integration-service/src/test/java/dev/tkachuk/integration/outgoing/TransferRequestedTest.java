@@ -15,7 +15,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class TransferRequestedTest {
 
     @Test
-    void acceptsAValidTransfer() {
+    void shouldAcceptValidTransfer() {
         assertThat(TestTransfers.transfer().transferId()).isEqualTo(TestTransfers.TRANSFER_ID);
     }
 
@@ -36,7 +36,7 @@ class TransferRequestedTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("brokenEvents")
-    void refusesABrokenEvent(String event, UnaryOperator<TestTransfers.Builder> breakIt, String rule) {
+    void shouldRejectInvalidTransfer(String event, UnaryOperator<TestTransfers.Builder> breakIt, String rule) {
         assertThatThrownBy(() -> breakIt.apply(TestTransfers.builder()).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(rule);

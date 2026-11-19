@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.tkachuk</groupId>
         <artifactId>bank-integration</artifactId>
-        <version>0.6.1</version>
+        <version>0.7.3</version>
     </parent>
 
     <artifactId>partner-bank-sim</artifactId>
@@ -19,7 +19,6 @@
             <groupId>dev.tkachuk</groupId>
             <artifactId>interbank-contract</artifactId>
         </dependency>
-        <!-- The payments API (PaymentsController) and the actuator health endpoint; the messages go over RabbitMQ. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>

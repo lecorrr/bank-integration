@@ -11,15 +11,7 @@ import dev.tkachuk.interbank.iso20022.pacs002.StatusReasonInformation12;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * The receiving bank's answer about one pacs.008: an ISO 20022 pacs.002.001.10 payment status report, sent for
- * the payment itself and again for every status request (pacs.028) about it. It repeats the original payment's
- * ids, which is how the sending bank matches the answer to its payment. The XML is written and read with the
- * classes generated from the official XSD, package {@code pacs002}.
- *
- * @param reasonCode why the payment has this status, as an ISO code (TxInfAndSts/StsRsnInf/Rsn/Cd), such as
- *                   AC04 for a closed account; null when the report gives none
- */
+/** pacs.002.001.10, a bank's answer about one pacs.008. */
 public record Pacs002(
         String messageId,
         Instant createdAt,
@@ -49,36 +41,27 @@ public record Pacs002(
         Fields.reasonCode(reasonCode);
     }
 
-    /** The status report for one payment, carrying that payment's ids, with no reason given. */
     public static Pacs002 answering(Pacs008 payment, TransactionStatus status, String messageId, Instant createdAt) {
         return report(payment, status, null, messageId, createdAt);
     }
 
-    /** The refusal of one payment (RJCT), with the reason as an ISO code, such as AC04 for a closed account. */
     public static Pacs002 rejecting(Pacs008 payment, String reasonCode, String messageId, Instant createdAt) {
         Fields.required("reasonCode", reasonCode);
         return report(payment, TransactionStatus.RJCT, reasonCode, messageId, createdAt);
     }
 
-    /**
-     * The answer to a status request about a payment this bank never received: RJCT with reason AG09
-     * ({@link StatusReason#PAYMENT_NOT_RECEIVED}), carrying the ids the request gave.
-     */
+    /** RJCT AG09: the answer to a status request about a payment we never received. */
     public static Pacs002 notReceived(Pacs028 request, String messageId, Instant createdAt) {
         return rejecting(request, StatusReason.PAYMENT_NOT_RECEIVED, messageId, createdAt);
     }
 
-    /**
-     * The answer to a status request about a message this bank refused (RJCT), carrying the ids the request gave:
-     * for one it never received (AG09), or one it took for a copy of another payment (AM05).
-     */
     public static Pacs002 rejecting(Pacs028 request, String reasonCode, String messageId, Instant createdAt) {
         Fields.required("reasonCode", reasonCode);
         return new Pacs002(messageId, createdAt, request.originalMessageId(), request.originalEndToEndId(),
                 request.originalTransactionId(), request.originalUetr(), TransactionStatus.RJCT, reasonCode);
     }
 
-    /** The same answer in a new report, with its own id: what a bank sends when asked about the payment again. */
+    /** The same answer in a new report, as for a status request. */
     public Pacs002 repeat(String newMessageId, Instant newCreatedAt) {
         return new Pacs002(newMessageId, newCreatedAt, originalMessageId, originalEndToEndId, originalTransactionId,
                 originalUetr, status, reasonCode);
@@ -121,10 +104,6 @@ public record Pacs002(
         return XML.write(document);
     }
 
-    /**
-     * @throws InvalidMessageException when the XML is not a pacs.002.001.10 that the schema accepts, or not a
-     *                                 report on one transaction with every field we need
-     */
     public static Pacs002 parse(String xml) {
         FIToFIPaymentStatusReportV10 report = XML.read(xml).getFIToFIPmtStsRpt();
         GroupHeader91 header = report.getGrpHdr();
@@ -145,10 +124,7 @@ public record Pacs002(
         }
     }
 
-    /**
-     * The first reason given as an ISO code. A bank may give its reasons in its own words (Rsn/Prtry) instead,
-     * or none at all; the report is still valid, it just has no code.
-     */
+    // A reason given in the bank's own words (Rsn/Prtry) leaves the code empty rather than failing the report.
     private static String reasonCodeOf(PaymentTransaction110 transaction) {
         return transaction.getStsRsnInf().stream()
                 .map(StatusReasonInformation12::getRsn)

@@ -1,0 +1,13 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+    <soapenv:Body>
+        <ScreenPaymentResponse xmlns="urn:bank-integration:sanctions-screening:1">
+            <PaymentReference>{{soapXPath request.body 'ScreenPaymentRequest/PaymentReference/text()'}}</PaymentReference>
+            <ScreeningId>SCR-{{randomValue length=12 type='ALPHANUMERIC' uppercase=true}}</ScreeningId>
+            <Outcome>HIT</Outcome>
+            <Match>
+                <Field>REMITTANCE_INFORMATION</Field>
+                <ListName>UA-NSDC</ListName>
+            </Match>
+        </ScreenPaymentResponse>
+    </soapenv:Body>
+</soapenv:Envelope>

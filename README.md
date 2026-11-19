@@ -1,92 +1,57 @@
 # bank-integration
 
-Moves payments between bank-core and other banks the way banks do it: ISO 20022 messages over message brokers,
-handled by an Apache Camel service. This is Project 2 of three; bank-core is Project 1.
+Moves payments between bank-core and other banks: ISO 20022 messages (pacs.008, pacs.002, pacs.028) over
+RabbitMQ, events to and from bank-core over Kafka, an Apache Camel service in between, and sanctions screening
+over SOAP. This is Project 2 of three; bank-core is Project 1.
 
-**Status: step 5 of 8 done: payments in both directions.** Flow A takes bank-core's transfers to other banks:
-the transfer event on Kafka becomes a pacs.008 to a simulated partner bank over RabbitMQ, and the partner's
-pacs.002 comes back to Kafka as a status event, on which bank-core completes the transfer or gives the money
-back. Flow B brings the partner bank's payments in: its pacs.008 becomes an event on which bank-core credits the
-payee or refuses, and bank-core's decision goes back to the partner bank as a pacs.002. integration-service keeps
-every payment in PostgreSQL: a repeated event or message is never acted on twice, a failed step is retried, a
-message it cannot use is put aside in a dead-letter topic or queue, and either bank can ask about a payment with
-a pacs.028 status request. Only a definite answer moves money: silence never does. Every ISO 20022 message is
-built with classes generated from the official schemas and checked against them on the way out and on the way
-in. SFTP already runs in the stack and comes into use in step 7.
+Status: steps 1 to 6 of 8 are done.
+
+- **Flow A**, bank-core to another bank: a transfer event becomes a pacs.008 to the partner bank, and its pacs.002
+  answer becomes a status event for bank-core.
+- **Flow B**, another bank to bank-core: the partner bank's pacs.008 becomes an event for bank-core, and
+  bank-core's decision goes back as a pacs.002.
+- Every payment is stored in PostgreSQL and screened against the sanctions lists before it leaves our bank or
+  reaches bank-core. Late answers are chased with pacs.028 status requests.
 
 ```
-flow A
-bank-core ──TransferRequested──▶ Kafka ──▶ integration-service ──pacs.008──▶ RabbitMQ ──▶ partner-bank-sim
-                                           (PostgreSQL)        ──pacs.028──▶ (when the answer is late)
-bank-core ◀──TransferStatusChanged── Kafka ◀── integration-service ◀──pacs.002── RabbitMQ ◀──┘
+flow A  bank-core -> Kafka -> integration-service -> RabbitMQ -> partner-bank-sim
+        bank-core <- Kafka <- integration-service <- RabbitMQ <- partner-bank-sim
 
-flow B
-partner-bank-sim ──pacs.008──▶ RabbitMQ ──▶ integration-service ──IncomingTransferReceived──▶ Kafka ──▶ bank-core
-                 ──pacs.028──▶ (to ask)     (PostgreSQL)
-partner-bank-sim ◀──pacs.002── RabbitMQ ◀── integration-service ◀──IncomingTransferDecided── Kafka ◀──┘
+flow B  partner-bank-sim -> RabbitMQ -> integration-service -> Kafka -> bank-core
+        partner-bank-sim <- RabbitMQ <- integration-service <- Kafka <- bank-core
+
+        integration-service -> sanctions screening (SOAP, circuit breaker), PostgreSQL
 ```
-
-## Layout
 
 | Module | What it is |
 |---|---|
-| `interbank-contract` | What both banks agree on: the RabbitMQ topology (`InterbankTopology`), the ISO 20022 messages (`Pacs008`, `Pacs002`, `Pacs028`) with their official schemas, and the status reason codes they use (`StatusReason`) |
-| `integration-service` | The Camel service, port 8082. Flow A (`outgoing`): transfer events become pacs.008 messages and pacs.002 answers status events, and late answers are asked about. Flow B (`incoming`): the partner's pacs.008 messages become payment events for bank-core, and bank-core's decisions pacs.002 answers. Every payment is kept in PostgreSQL |
-| `partner-bank-sim` | Plays the other bank, port 8083. As the payee's bank it answers a pacs.008 with a pacs.002: accepted unless the payee's account is closed, or not at all for a silent account. As the payer's bank it sends payments to bank-core's customers through a small HTTP API, keeps the answers, and sends a payment again when it was never received |
+| `interbank-contract` | What both banks share: the RabbitMQ topology and the ISO 20022 messages, generated from the official schemas |
+| `integration-service` | The Camel service, port 8082: flow A in `outgoing`, flow B in `incoming`, the screening client in `screening` |
+| `partner-bank-sim` | The other bank, port 8083: answers our messages and sends payments to us through a small REST API |
 
-`compose.yaml` runs the whole stack on localhost: PostgreSQL (5435), RabbitMQ (5672, management UI on 15672),
-Kafka (9092), SFTP (2222) and both applications. `ARCHITECTURE.md` has the design, the rules, and what happens
-when each part fails.
+The design, the rules and the failure handling are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Set up (once)
+## Build
 
-It needs what bank-core needs: JDK 21 and Docker. From `~/projects/bank-integration`, copy bank-core's Maven
-wrapper:
+Needs JDK 21 or newer and Docker. Copy bank-core's Maven wrapper once:
 
 ```
 cp -r ~/projects/bank-core/mvnw ~/projects/bank-core/.mvn .
 ```
 
-## Build and test
-
 ```
 ./mvnw verify
 ```
 
-Unit tests (`*Test`) run first, then the integration tests (`*IT`), which start PostgreSQL, RabbitMQ and Kafka
-in Docker through Testcontainers. The image tags are `postgres.image`, `rabbitmq.image` and `kafka.image` in
-`pom.xml`; `compose.yaml` uses the same ones. In integration-service, `TransferFlowIT` and `IncomingFlowIT` play
-the partner bank and bank-core, flow A and flow B, losing a payment, answering late or answering nonsense;
-`OutgoingPaymentsIT` and `IncomingPaymentsIT` run the payment tables' SQL.
+Unit tests (`*Test`) run first, then the integration tests (`*IT`) with PostgreSQL, RabbitMQ and Kafka in
+Testcontainers and WireMock in place of the screening service. `verify` fails below 80 % line coverage per
+module; the report is `target/site/jacoco/index.html`. The message classes are generated from the XSDs into
+`target/generated-sources` and are never edited or committed.
 
-`verify` also checks coverage: every module must reach 80 % line coverage from its unit and integration tests
-together, classes generated from the schemas left out. Each module's report is `target/site/jacoco/index.html`.
+## Run
 
-The build generates the message classes from the schemas first (`target/generated-sources/pacs008`, `pacs002`
-and `pacs028` in `interbank-contract`); they are never edited or committed.
-
-## ISO 20022 schemas
-
-`interbank-contract/src/main/resources/xsd` holds the three official schemas, unchanged, as published by
-iso20022.org in the message set *Payments Clearing and Settlement* (all three from its 2019 release):
-
-| File | Message | Download |
-|---|---|---|
-| `pacs.008.001.08.xsd` | FIToFICustomerCreditTransferV08 | <https://www.iso20022.org/message/14231/download> |
-| `pacs.002.001.10.xsd` | FIToFIPaymentStatusReportV10 | <https://www.iso20022.org/message/14061/download> |
-| `pacs.028.001.03.xsd` | FIToFIPaymentStatusRequestV03 | the message archive, <https://www.iso20022.org/catalogue-messages/iso-20022-messages-archive> |
-
-`SchemaFilesTest` pins their SHA-256, and `.gitattributes` keeps git from converting their CRLF line endings.
-To check a fresh download against them:
-
-```
-sha256sum interbank-contract/src/main/resources/xsd/*.xsd
-```
-
-## Run the demo
-
-Both flows need bank-core 0.5 or later, run with its demo accounts as its README shows (*Run it*). Build the jars,
-then start the stack:
+The demo needs bank-core 0.5 or later, running with its demo accounts (see its README). Build the jars and start
+the stack:
 
 ```
 ./mvnw -DskipTests package
@@ -96,115 +61,113 @@ then start the stack:
 docker compose up -d --build
 ```
 
-### Flow A: a transfer from bank-core to the partner bank
+Everything listens on localhost: integration-service 8082, partner-bank-sim 8083, the screening stub 8084,
+PostgreSQL 5435, RabbitMQ 5672 (management UI on 15672, `interbank` / `interbank`), Kafka 9092 and SFTP 2222.
+Each application logs its version when it starts, for example `integration-service 0.7.3 started`.
 
-Send a transfer to another bank from bank-core, as its README shows (*Try it*). The partner bank decides by the
-payee's account:
+To run the applications outside Docker, start only the infrastructure, then each jar in its own terminal:
 
-| Payee at the partner bank | What happens | The transfer in bank-core |
+```
+docker compose up -d postgres rabbitmq kafka sanctions-screening
+```
+
+```
+java -jar integration-service/target/integration-service-0.7.3.jar
+```
+
+```
+java -jar partner-bank-sim/target/partner-bank-sim-0.7.3.jar
+```
+
+## Try it
+
+### Flow A: a transfer from bank-core
+
+Send a transfer to another bank from bank-core (see its README). The partner bank decides by the payee's account:
+
+| Payee | Partner bank answers | Transfer in bank-core |
 |---|---|---|
-| `UA643888880000000000000000777` | accepted (pacs.002 ACSC) | `COMPLETED` |
-| `UA843888880000000000000000999` | refused, the account is closed (RJCT AC04) | `REJECTED`, the money back on the payer's account |
-| `UA443888880000000000000000555` | no answer at all, as if it were lost | stays `PENDING` |
+| `UA643888880000000000000000777` | ACSC | `COMPLETED` |
+| `UA843888880000000000000000999` | RJCT AC04, account closed | `REJECTED`, money returned |
+| `UA443888880000000000000000555` | nothing | `PENDING` |
 
-The silent account shows what happens when no answer comes. After 30 seconds integration-service asks with a
-pacs.028; the partner bank answers PDNG (it has the payment, undecided), and bank-core hears `PENDING`. The
-requests go on, the wait doubling each time up to 10 minutes, and from the fifth one, about 15 minutes in, each
-is logged as an error for a person to take up. The money stays held: no answer is not a refusal.
+For the silent account, integration-service sends a pacs.028 after 30 seconds and the partner bank answers PDNG.
+The requests continue, the wait doubling up to 10 minutes, and from the fifth one each is logged as an error. The
+money stays held: no answer is not a refusal.
 
-### Flow B: a payment from the partner bank to bank-core
+### Flow B: a payment from the partner bank
 
-The simulator pays from its customer Olena Kovalenko (`UA643888880000000000000000777`). Send 250 UAH to
-bank-core's demo account; the answer is `202` with the payment's `uetr` and `messageId`:
+The simulator pays from its customer Olena Kovalenko. Send 250 UAH to bank-core's demo account; the response has
+the payment's `uetr`:
 
 ```
 curl -sS -w '\n' -X POST localhost:8083/api/payments -H 'Content-Type: application/json' -d '{"toIban": "UA843999990000000000000000001", "toName": "Artem Demo", "amount": 250.00, "description": "For the concert tickets"}'
 ```
 
-What bank-core's bank answered, with the `uetr` from that answer in place of `UETR`:
+See the answers it got, with the `uetr` from the response in place of `UETR`:
 
 ```
 curl -sS -w '\n' localhost:8083/api/payments/UETR
 ```
 
-Ask about the payment with a pacs.028; its answer joins the list above:
+Ask about it with a pacs.028:
 
 ```
 curl -sS -w '\n' -X POST localhost:8083/api/payments/UETR/status-requests
 ```
 
-Who decides depends on what is wrong, and either way no money moves on a refusal:
-
-| The payment | Decided by | The answer (pacs.002) |
+| Payment | Decided by | pacs.002 |
 |---|---|---|
-| to `UA843999990000000000000000001`, in UAH | bank-core: credited, the statement shows an `INCOMING` entry | ACSC |
-| to `UA733999990000000000000000005`, an account bank-core does not keep | bank-core | RJCT AC01 |
-| to `UA033999990000000000000000004`, bank-core's dollar account | bank-core | RJCT CURR |
-| with `"currency": "USD"` | integration-service, before bank-core sees it | RJCT AM03 |
+| to `UA843999990000000000000000001` in UAH | bank-core, credited | ACSC |
+| to `UA733999990000000000000000005`, no such account | bank-core | RJCT AC01 |
+| to `UA033999990000000000000000004`, a USD account | bank-core | RJCT CURR |
+| with `"currency": "USD"` | integration-service | RJCT AM03 |
 | with `"amount": 250.005` | integration-service | RJCT AM12 |
-| to `UA643888880000000000000000777`, an account at the partner bank itself | integration-service | RJCT AC01 |
+| to `UA643888880000000000000000777`, not our bank | integration-service | RJCT AC01 |
+| with `"toName": "Sanctioned Test Entity"` | integration-service, sanctions hit | RJCT RR04 |
 
-### What to look at
+### Sanctions screening
 
-The logs show each message going out and coming in, a refusal with its ISO 20022 reason code; each application
-also logs its version at startup (`integration-service 0.6.1 started`):
+The stub knows one listed name, `Sanctioned Test Entity`, as payer, payee or in the remittance information. A
+transfer from bank-core to that name never leaves (bank-core hears `REJECTED`); a payment from the partner bank
+to it gets RJCT RR04 and never reaches bank-core.
+
+Stop the screening service and send any payment: it waits, nothing is sent or rejected, and the log shows the
+circuit breaker opening. Start the service again and the payment continues within a minute.
+
+```
+docker compose stop sanctions-screening
+```
+
+```
+docker compose start sanctions-screening
+```
+
+### Logs and data
 
 ```
 docker compose logs integration-service partner-bank-sim
 ```
 
-The payments integration-service holds, newest first, flow A and then flow B:
-
 ```
-docker compose exec postgres psql -U integration -d integration -c "SELECT transfer_id, state, times_sent, status_requests, next_check_at FROM outgoing_payment ORDER BY created_at DESC LIMIT 10" -c "SELECT uetr, message_id, status, reason_code, report_id, bank_transfer_id FROM incoming_payment ORDER BY received_at DESC LIMIT 10"
+docker compose exec postgres psql -U integration -d integration -c "SELECT transfer_id, state, screening_outcome, times_sent, status_requests FROM outgoing_payment ORDER BY created_at DESC LIMIT 10" -c "SELECT uetr, status, reason_code, screening_outcome, bank_transfer_id FROM incoming_payment ORDER BY received_at DESC LIMIT 10"
 ```
 
-The RabbitMQ management UI is at <http://localhost:15672> (user `interbank`, password `interbank`), with the
-`interbank` exchange and its nine quorum queues. A message integration-service could not act on waits in a queue
-ending in `.dlq` (`bank.pacs002.dlq`, `bank.pacs008.dlq`, `bank.pacs028.dlq`), with the reason in its
-`dead-letter-reason` header (*Get messages* on the queue's page); an event on Kafka it could not act on waits in a
-topic ending in `.DLT`. `docker compose stop` stops the stack and keeps its data.
+Messages integration-service could not use are kept as they came: RabbitMQ messages in the queues ending in
+`.dlq`, Kafka events in the topics ending in `.DLT`, each with a `dead-letter-reason` header.
 
-## Run the applications outside Docker
+## ISO 20022 schemas
 
-Start PostgreSQL, RabbitMQ and Kafka only, build once, then run each application in its own terminal:
+`interbank-contract/src/main/resources/xsd` holds the official schemas from iso20022.org (Payments Clearing and
+Settlement, 2019 release), unchanged. `SchemaFilesTest` pins their SHA-256 and `.gitattributes` keeps their CRLF
+line endings.
 
-```
-docker compose up -d postgres rabbitmq kafka
-```
+| File | Message | Source |
+|---|---|---|
+| `pacs.008.001.08.xsd` | FIToFICustomerCreditTransferV08 | <https://www.iso20022.org/message/14231/download> |
+| `pacs.002.001.10.xsd` | FIToFIPaymentStatusReportV10 | <https://www.iso20022.org/message/14061/download> |
+| `pacs.028.001.03.xsd` | FIToFIPaymentStatusRequestV03 | <https://www.iso20022.org/catalogue-messages/iso-20022-messages-archive> |
 
-```
-java -jar integration-service/target/integration-service-0.6.1.jar
-```
+## Next
 
-```
-java -jar partner-bank-sim/target/partner-bank-sim-0.6.1.jar
-```
-
-## The events on Kafka
-
-Every event is JSON, written in `ARCHITECTURE.md` in full. bank-core publishes the ones marked so, through its
-outbox, and reads the others.
-
-| Topic | Event | Key | Who writes it |
-|---|---|---|---|
-| `interbank.transfers` | `TransferRequested`: a transfer to a customer of another bank | the payer's IBAN | bank-core |
-| `interbank.transfer-statuses` | `TransferStatusChanged`: `SETTLED`, `REJECTED` or `PENDING` | the transfer id | integration-service |
-| `interbank.incoming-transfers` | `IncomingTransferReceived`: a payment from another bank to a customer of bank-core | the payee's IBAN | integration-service |
-| `interbank.incoming-transfer-decisions` | `IncomingTransferDecided`: `CREDITED`, or `REJECTED` with a reason | the UETR | bank-core |
-| `interbank.transfers.DLT` | an event from `interbank.transfers` that is not a valid transfer, as it came | as it came | integration-service |
-| `interbank.incoming-transfer-decisions.DLT` | a decision integration-service cannot act on, as it came | as it came | integration-service |
-
-## The partner bank's API
-
-`partner-bank-sim` sends its payments on request, for demos and tests (`PaymentsController`):
-
-| Request | What it does |
-|---|---|
-| `POST /api/payments` with `toIban`, `toName`, `amount`, `description`, and `currency` (UAH when left out) | sends a pacs.008 under a new UETR and MsgId; `202` with both |
-| `GET /api/payments/{uetr}` | the payment, how many times it went out, and every answer about it |
-| `POST /api/payments/{uetr}/status-requests` | sends a pacs.028 about it; `202` with the request's MsgId |
-
-## What comes next
-
-Step 6 screens every payment, both ways, against a sanctions list over SOAP, with a circuit breaker in front.
+Step 7: reconcile our payments with the partner bank's camt.053 statements, delivered over SFTP.

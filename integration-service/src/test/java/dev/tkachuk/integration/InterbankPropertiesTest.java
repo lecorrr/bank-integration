@@ -15,7 +15,7 @@ class InterbankPropertiesTest {
     private static final Map<String, String> PARTNER = Map.of("388888", "PRTBUAUKXXX");
 
     @Test
-    void findsAParticipantsBicByItsBankCode() {
+    void shouldFindParticipantBicByBankCode() {
         InterbankProperties bank = new InterbankProperties("399999", "BNKCUAUKXXX", PARTNER);
 
         assertThat(bank.participantBic("388888")).hasValue("PRTBUAUKXXX");
@@ -23,7 +23,7 @@ class InterbankPropertiesTest {
     }
 
     @Test
-    void knowsItsOwnAccountsByTheBankCodeInTheIban() {
+    void shouldRecognizeOwnAccountByBankCode() {
         InterbankProperties bank = new InterbankProperties("399999", "BNKCUAUKXXX", PARTNER);
 
         assertThat(bank.isOurAccount("UA843999990000000000000000001")).isTrue();
@@ -33,7 +33,7 @@ class InterbankPropertiesTest {
     }
 
     @Test
-    void knowsWhichParticipantKeepsAnAccount() {
+    void shouldCheckWhichParticipantHoldsAccount() {
         InterbankProperties bank = new InterbankProperties("399999", "BNKCUAUKXXX", PARTNER);
 
         assertThat(bank.isParticipantAccount("UA643888880000000000000000777", "PRTBUAUKXXX")).isTrue();
@@ -43,7 +43,7 @@ class InterbankPropertiesTest {
     }
 
     @Test
-    void readsTheBankCodeOfAUkrainianIbanOnly() {
+    void shouldReadBankCodeOnlyFromUkrainianIban() {
         assertThat(InterbankProperties.bankCodeOf("UA843999990000000000000000001")).hasValue("399999");
         assertThat(InterbankProperties.bankCodeOf("UA84399999000000000000000000")).as("one character short")
                 .isEmpty();
@@ -65,8 +65,8 @@ class InterbankPropertiesTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("wrongSettings")
-    void refusesAWrongSettingAndNamesIt(String setting, String bankCode, String bic, Map<String, String> participants,
-            String named) {
+    void shouldRejectInvalidSettingAndNameIt(String setting, String bankCode, String bic,
+            Map<String, String> participants, String named) {
         assertThatThrownBy(() -> new InterbankProperties(bankCode, bic, participants))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(named);

@@ -22,7 +22,7 @@ class IncomingPaymentTest {
     private final String xml = payment.toXml();
 
     @Test
-    void aPaymentJustReceivedWaitsForBankCore() {
+    void shouldWaitForBankCoreWhenJustReceived() {
         IncomingPayment received = IncomingPayment.received(payment, xml, RECEIVED_AT);
 
         assertThat(received.uetr()).isEqualTo(UUID.fromString(payment.uetr()));
@@ -33,7 +33,7 @@ class IncomingPaymentTest {
     }
 
     @Test
-    void ourOwnRefusalIsAnAnswerThatNoTransferOfBankCoreGave() {
+    void shouldTreatOwnRefusalAsAnswerWithoutTransfer() {
         IncomingPayment refused = IncomingPayment.refused(payment, xml, RECEIVED_AT,
                 StatusReason.NOT_ALLOWED_CURRENCY, "REFUSAL-1");
 
@@ -45,7 +45,7 @@ class IncomingPaymentTest {
     }
 
     @Test
-    void theAnswerIsTheSamePacs002EveryTimeItIsMade() {
+    void shouldBuildSamePacs002EveryTime() {
         IncomingPayment refused = IncomingPayment.refused(payment, xml, RECEIVED_AT,
                 StatusReason.NOT_ALLOWED_CURRENCY, "REFUSAL-1");
 
@@ -57,7 +57,7 @@ class IncomingPaymentTest {
     }
 
     @Test
-    void anAcceptanceAnswersWithoutAReason() {
+    void shouldAcceptWithoutReason() {
         IncomingPayment credited = answered(TransactionStatus.ACSC, null);
 
         Pacs002 answer = credited.answer();
@@ -70,7 +70,7 @@ class IncomingPaymentTest {
     }
 
     @Test
-    void anAnswerGivesBankCoresDecisionOnlyIfStatusReasonAndTransferAllMatch() {
+    void shouldMatchDecisionOnlyWhenStatusReasonAndTransferMatch() {
         IncomingPayment rejected = answered(TransactionStatus.RJCT, StatusReason.INCORRECT_ACCOUNT_NUMBER);
         UUID uetr = rejected.uetr();
 
@@ -86,6 +86,6 @@ class IncomingPaymentTest {
 
     private IncomingPayment answered(TransactionStatus status, String reasonCode) {
         return new IncomingPayment(UUID.fromString(payment.uetr()), payment.debtorAgentBic(), payment.messageId(), xml,
-                RECEIVED_AT, status, reasonCode, "ANSWER-1", ANSWERED_AT, TRANSFER_ID);
+                RECEIVED_AT, status, reasonCode, "ANSWER-1", ANSWERED_AT, TRANSFER_ID, null);
     }
 }

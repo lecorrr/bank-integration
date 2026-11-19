@@ -38,19 +38,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * The simulator against a real RabbitMQ: the test plays bank-core's bank. As the payee's bank (flow A), it sends
- * pacs.008 and pacs.028 messages and reads the answers; as the payer's bank (flow B), the simulator sends payments
- * through its API, and the test takes them off bank-core's queues and answers them. The simulator remembers every
- * payment for the whole test run, so each test uses its own MsgIds.
- */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(RabbitTestcontainer.class)
 class PartnerBankSimIT {
 
     private static final long RECEIVE_TIMEOUT_MS = 10_000;
-    /** How long to watch for an answer that must not come. */
     private static final long QUIET_MS = 2_000;
 
     @Autowired
@@ -64,7 +57,6 @@ class PartnerBankSimIT {
 
     @BeforeEach
     void declareTheTopologyAndEmptyTheQueues() {
-        // Declares InterbankTopology now, so no message is published before its queue exists.
         admin.initialize();
         for (String queue : InterbankTopology.queues()) {
             admin.purgeQueue(queue, false);
@@ -72,7 +64,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void answersAPaymentWithAnAcceptedStatusReport() {
+    void shouldAnswerPaymentWithAcsc() {
         Pacs008 payment = TestPayments.pacs008(newMessageId());
 
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, payment.toXml());
@@ -82,12 +74,11 @@ class PartnerBankSimIT {
         assertThat(report.originalMessageId()).isEqualTo(payment.messageId());
         assertThat(report.originalEndToEndId()).isEqualTo(payment.endToEndId());
         assertThat(report.status()).isEqualTo(TransactionStatus.ACSC);
-        // The answer travels under its own id, not the payment's.
         assertThat(answer.getMessageProperties().getMessageId()).isEqualTo(report.messageId());
     }
 
     @Test
-    void refusesAPaymentToTheClosedAccountInItsConfiguration() {
+    void shouldRejectPaymentToClosedAccount() {
         Pacs008 payment = TestPayments.pacs008(newMessageId(), TestPayments.CLOSED_ACCOUNT);
 
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, payment.toXml());
@@ -99,7 +90,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void answersEveryPaymentOnce() {
+    void shouldAnswerEveryPaymentOnce() {
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, TestPayments.pacs008(newMessageId()).toXml());
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, TestPayments.pacs008(newMessageId()).toXml());
 
@@ -112,7 +103,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void answersTheSamePaymentAgainAsBefore() {
+    void shouldRepeatAnswerForDuplicatePayment() {
         Pacs008 payment = TestPayments.pacs008(newMessageId(), TestPayments.CLOSED_ACCOUNT);
 
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, payment.toXml());
@@ -127,7 +118,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void leavesAPaymentToASilentAccountUnansweredAndAnswersPendingWhenAsked() {
+    void shouldAnswerPendingForSilentAccountWhenAsked() {
         Pacs008 payment = TestPayments.pacs008(newMessageId(), TestPayments.SILENT_ACCOUNT);
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, payment.toXml());
         assertThat(rabbit.receive(BANK_PACS002, QUIET_MS)).as("an answer to the payment").isNull();
@@ -140,7 +131,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void answersAStatusRequestWithThePaymentsAnswer() {
+    void shouldAnswerStatusRequestWithPaymentAnswer() {
         Pacs008 payment = TestPayments.pacs008(newMessageId());
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, payment.toXml());
         Pacs002 first = Pacs002.parse(bodyOf(takeAnswer()));
@@ -154,7 +145,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void answersAStatusRequestAboutAPaymentItNeverReceivedWithAg09() {
+    void shouldAnswerAg09ForUnknownPayment() {
         Pacs008 neverSent = TestPayments.pacs008(newMessageId());
 
         rabbit.convertAndSend(EXCHANGE, PARTNER_PACS028, statusRequestAbout(neverSent).toXml());
@@ -166,7 +157,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void sendsAPaymentToBankCoresBankAndKeepsTheAnswer() throws Exception {
+    void shouldSendPaymentAndKeepAnswer() throws Exception {
         Map<?, ?> sent = sendPayment("""
                 {"toIban": "%s", "toName": "Artem Demo", "amount": 250.00, "description": "For the concert tickets"}
                 """.formatted(TestPayments.BANK_CORE_CUSTOMER));
@@ -189,7 +180,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void asksAboutAPaymentWithAPacs028() throws Exception {
+    void shouldSendPacs028ForPayment() throws Exception {
         Map<?, ?> sent = sendPayment(aPaymentToBankCore());
         Pacs008 payment = Pacs008.parse(bodyOf(takeFrom(BANK_PACS008)));
 
@@ -204,9 +195,8 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void sendsThePaymentAgainWhenBankCoresBankNeverReceivedIt() throws Exception {
+    void shouldResendPaymentOnAg09() throws Exception {
         sendPayment(aPaymentToBankCore());
-        // Taken off the queue and dropped: bank-core's bank never sees it.
         String lost = bodyOf(takeFrom(BANK_PACS008));
         Pacs008 payment = Pacs008.parse(lost);
 
@@ -217,7 +207,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void refusesAPaymentThatAPacs008CannotCarryAndSaysWhy() throws Exception {
+    void shouldReturnBadRequestForInvalidPayment() throws Exception {
         String withoutAName = """
                 {"toIban": "%s", "amount": 250.00, "description": "For the concert tickets"}
                 """.formatted(TestPayments.BANK_CORE_CUSTOMER);
@@ -231,7 +221,7 @@ class PartnerBankSimIT {
     }
 
     @Test
-    void knowsNoPaymentItNeverSent() throws Exception {
+    void shouldReturnNotFoundForUnknownPayment() throws Exception {
         String unknown = UUID.randomUUID().toString();
 
         mvc.perform(get("/api/payments/{uetr}", unknown)).andExpect(status().isNotFound());
@@ -245,7 +235,6 @@ class PartnerBankSimIT {
                 """.formatted(TestPayments.BANK_CORE_CUSTOMER);
     }
 
-    /** Sends a payment through the simulator's API, as a person running the demo does. */
     private Map<?, ?> sendPayment(String json) throws Exception {
         String body = mvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON).content(json))
                 .andExpect(status().isAccepted())
@@ -253,7 +242,6 @@ class PartnerBankSimIT {
         return new JsonMapper().readValue(body, Map.class);
     }
 
-    /** The first answer the simulator keeps about its payment, once it has one. */
     private Map<?, ?> firstAnswerTo(Object uetr) throws Exception {
         Instant deadline = Instant.now().plusMillis(RECEIVE_TIMEOUT_MS);
         while (Instant.now().isBefore(deadline)) {
@@ -293,7 +281,6 @@ class PartnerBankSimIT {
         return UUID.randomUUID().toString().replace("-", "");
     }
 
-    /** Honours the encoding the sender declared; Camel declares the JVM's, which is UTF-8 since Java 18. */
     private static String bodyOf(Message message) {
         String encoding = message.getMessageProperties().getContentEncoding();
         return new String(message.getBody(), encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding));

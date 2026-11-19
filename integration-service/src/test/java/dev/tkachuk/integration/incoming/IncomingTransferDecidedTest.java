@@ -19,7 +19,7 @@ class IncomingTransferDecidedTest {
     private static final Instant DECIDED_AT = Instant.parse("2026-11-18T09:15:03Z");
 
     @Test
-    void aPaymentCreditedIsAcceptedWithoutAReason() {
+    void shouldMapCreditedToAcsc() {
         IncomingTransferDecided credited = new IncomingTransferDecided(UETR, TRANSFER_ID, Decision.CREDITED, null,
                 DECIDED_AT);
 
@@ -31,7 +31,7 @@ class IncomingTransferDecidedTest {
     @CsvSource({
             "UNKNOWN_ACCOUNT, AC01",
             "CURRENCY_MISMATCH, CURR"})
-    void aPaymentRefusedIsRejectedWithTheIsoCodeForBankCoresReason(String reason, String reasonCode) {
+    void shouldMapRejectedToIsoReasonCode(String reason, String reasonCode) {
         IncomingTransferDecided rejected = new IncomingTransferDecided(UETR, TRANSFER_ID, Decision.REJECTED, reason,
                 DECIDED_AT);
 
@@ -40,7 +40,7 @@ class IncomingTransferDecidedTest {
     }
 
     @Test
-    void aReasonThisServiceDoesNotKnowIsStillARefusal() {
+    void shouldMapUnknownReasonToMs03() {
         IncomingTransferDecided rejected = new IncomingTransferDecided(UETR, TRANSFER_ID, Decision.REJECTED,
                 "SOMETHING_NEW", DECIDED_AT);
 
@@ -48,26 +48,26 @@ class IncomingTransferDecidedTest {
     }
 
     @Test
-    void aPaymentCreditedHasNoReason() {
+    void shouldRejectReasonForCredited() {
         assertThatThrownBy(() -> new IncomingTransferDecided(UETR, TRANSFER_ID, Decision.CREDITED,
                 "UNKNOWN_ACCOUNT", DECIDED_AT))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("no reason");
+                .hasMessageContaining("must be null");
     }
 
     @Test
-    void aPaymentRefusedNeedsAReason() {
+    void shouldRequireReasonForRejected() {
         for (String reason : new String[] {null, " "}) {
             assertThatThrownBy(() -> new IncomingTransferDecided(UETR, TRANSFER_ID, Decision.REJECTED, reason,
                     DECIDED_AT))
                     .as("reason <%s>", reason)
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("needs a reason");
+                    .hasMessageContaining("reason is required");
         }
     }
 
     @Test
-    void needsTheTransferThatBankCoreMade() {
+    void shouldRequireTransferId() {
         assertThatThrownBy(() -> new IncomingTransferDecided(UETR, null, Decision.CREDITED, null, DECIDED_AT))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("required");

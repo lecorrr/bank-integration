@@ -2,11 +2,7 @@ package dev.tkachuk.integration.outgoing;
 
 import java.util.UUID;
 
-/**
- * A transfer our bank cannot send through SEP, such as one to a bank outside the directory. A definite answer,
- * not a passing failure, so trying again would not help: TransferRoute reports it to bank-core as REJECTED, and
- * bank-core gives the money back.
- */
+/** A transfer our bank can't send. It is reported to bank-core as REJECTED, not retried. */
 class TransferRefusedException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;

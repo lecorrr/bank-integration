@@ -21,16 +21,7 @@ import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.springframework.stereotype.Component;
 
-/**
- * The partner bank asks about a payment it sent us (pacs.028), and gets a pacs.002 back: our answer about it
- * again, PDNG while bank-core decides, RJCT AM05 for a message we refused as a copy of another payment, or RJCT
- * AG09 for one we never received, which the partner bank then sends again.
- *
- * <p>Answering changes nothing here, so a repeat is harmless; a step that fails is tried until it works
- * (Routes.retryUntilItWorks). A request that cannot be answered goes to bank.pacs028.dlq as it came, for a person
- * to look at: one that is not a valid pacs.028, one that is not from a participant to our bank, and one that names a
- * payment of ours with another payment's UETR.
- */
+/** Flow B: answers the partner bank's pacs.028 from what is stored. */
 @Component
 class IncomingStatusRequestRoute extends RouteBuilder {
 
@@ -66,31 +57,26 @@ class IncomingStatusRequestRoute extends RouteBuilder {
         Pacs028 request = Pacs028.parse(exchange.getMessage().getBody(String.class));
         requireFromParticipantToUs(request);
         Pacs002 answer = answerTo(request);
-        log.info("pacs.028 {} asks about pacs.008 {} (payment {}): answering pacs.002 {} {}{}", request.messageId(),
+        log.info("pacs.028 {} for pacs.008 {} (payment {}): answering pacs.002 {} {}{}", request.messageId(),
                 request.originalMessageId(), request.originalUetr(), answer.messageId(), answer.status(),
                 answer.reasonCode() == null ? "" : " " + answer.reasonCode());
         Routes.asInterbankMessage(exchange, answer.messageId(), answer.toXml());
     }
 
-    /**
-     * Our answer about the payment, in a new pacs.002: a new question gets a new message. The payment is looked up
-     * by the asking bank's MsgId for it, since a MsgId is unique per sending bank only.
-     */
     private Pacs002 answerTo(Pacs028 request) {
         Optional<IncomingPayment> asked =
                 payments.findByMessageId(request.instructingAgentBic(), request.originalMessageId());
         if (asked.isPresent()) {
             IncomingPayment payment = asked.get();
             if (!payment.uetr().toString().equals(request.originalUetr())) {
-                throw new UnusableMessageException("pacs.028 " + request.messageId() + " gives pacs.008 "
-                        + payment.messageId() + " another payment's UETR");
+                throw new UnusableMessageException("pacs.028 " + request.messageId()
+                        + " has the wrong UETR for pacs.008 " + payment.messageId());
             }
             return payment.answered()
                     ? payment.answer().repeat(Routes.newMessageId(), now())
                     : Pacs002.answering(Pacs008.parse(payment.pacs008()), TransactionStatus.PDNG,
                             Routes.newMessageId(), now());
         }
-        // A copy refused as a duplicate is not stored; the payment it copies is, under its own MsgId.
         boolean copyOfAPayment = payments.find(UUID.fromString(request.originalUetr())).isPresent();
         return Pacs002.rejecting(request,
                 copyOfAPayment ? StatusReason.DUPLICATION : StatusReason.PAYMENT_NOT_RECEIVED,
@@ -109,7 +95,7 @@ class IncomingStatusRequestRoute extends RouteBuilder {
     }
 
     private void toDeadLetter(Exchange exchange) {
-        log.error("A pacs.028 goes to {} for a person to look at: {}", BANK_PACS028_DLQ, Routes.failureOf(exchange));
+        log.error("Moving pacs.028 to {}: {}", BANK_PACS028_DLQ, Routes.failureOf(exchange));
         Routes.asQueueDeadLetter(exchange);
     }
 

@@ -1,0 +1,28 @@
+{
+  "name": "A listed name in the payment details: a hit",
+  "priority": 3,
+  "request": {
+    "method": "POST",
+    "url": "/ws/screening",
+    "headers": {
+      "SOAPAction": {
+        "contains": "urn:bank-integration:sanctions-screening:1:ScreenPayment"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matchesXPath": "/Envelope/Body/ScreenPaymentRequest/RemittanceInformation[contains(., 'Sanctioned Test Entity')]"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/xml; charset=utf-8"
+    },
+    "bodyFileName": "screen-payment-hit-details.xml",
+    "transformers": [
+      "response-template"
+    ]
+  }
+}

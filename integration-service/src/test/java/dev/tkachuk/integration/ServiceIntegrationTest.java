@@ -7,17 +7,18 @@ import java.lang.annotation.Target;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
-/**
- * The whole service against a real PostgreSQL, RabbitMQ and Kafka. Every test class with this annotation has the
- * same configuration, so Spring gives them one context, and the containers start once for all of them.
- */
+/** Starts the service against Testcontainers and the WireMock screening service, with short timings. */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @SpringBootTest(properties = {
-        // Short waits, so that a late answer is asked about well within a test's timeout.
         "status-requests.first-after=2s",
         "status-requests.max-interval=2s",
-        "status-requests.poll-interval=500ms"})
-@Import({PostgresTestcontainer.class, RabbitTestcontainer.class, KafkaTestcontainer.class})
+        "status-requests.poll-interval=500ms",
+        "sanctions-screening.circuit-breaker.sliding-window-size=4",
+        "sanctions-screening.circuit-breaker.minimum-number-of-calls=2",
+        "sanctions-screening.circuit-breaker.wait-in-open-state=1s",
+        "sanctions-screening.circuit-breaker.permitted-calls-in-half-open-state=1"})
+@Import({PostgresTestcontainer.class, RabbitTestcontainer.class, KafkaTestcontainer.class,
+        ScreeningServiceStub.class})
 public @interface ServiceIntegrationTest {
 }

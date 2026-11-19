@@ -20,18 +20,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
-/**
- * One customer credit transfer between two banks: an ISO 20022 pacs.008.001.08 message carrying a single
- * transaction (our scheme's rule; the message format allows several). The XML is written and read with the
- * classes generated from the official XSD, package {@code pacs008}, and checked against that XSD both ways.
- *
- * @param messageId             GrpHdr/MsgId, unique per sending bank
- * @param endToEndId            set by the payer and passed on unchanged to the payee
- * @param transactionId         set by the first instructing bank
- * @param uetr                  the unique end-to-end transaction reference, a UUID that every bank keeps
- * @param settlementDate        the business day the banks settle on
- * @param remittanceInformation the payment details the payee sees
- */
+/** pacs.008.001.08, a customer credit transfer between banks. Our scheme allows one transaction per message. */
 public record Pacs008(
         String messageId,
         Instant createdAt,
@@ -74,7 +63,6 @@ public record Pacs008(
         Fields.max140("remittanceInformation", remittanceInformation);
     }
 
-    /** @throws InvalidMessageException when the payment breaks the schema, e.g. an amount with six decimals */
     public String toXml() {
         FIToFICustomerCreditTransferV08 transfer = new FIToFICustomerCreditTransferV08();
         transfer.setGrpHdr(groupHeader());
@@ -84,10 +72,6 @@ public record Pacs008(
         return XML.write(document);
     }
 
-    /**
-     * @throws InvalidMessageException when the XML is not a pacs.008.001.08 that the schema accepts, or not a
-     *                                 single-transaction one with every field this project needs
-     */
     public static Pacs008 parse(String xml) {
         FIToFICustomerCreditTransferV08 transfer = XML.read(xml).getFIToFICstmrCdtTrf();
         GroupHeader93 header = transfer.getGrpHdr();
@@ -121,7 +105,6 @@ public record Pacs008(
         }
     }
 
-    /** One transaction, settled through a clearing system (CLRG). */
     private GroupHeader93 groupHeader() {
         SettlementInstruction7 settlement = new SettlementInstruction7();
         settlement.setSttlmMtd(SettlementMethod1Code.CLRG);
@@ -133,7 +116,6 @@ public record Pacs008(
         return header;
     }
 
-    /** The charges follow the scheme's rules (SLEV). */
     private CreditTransferTransaction39 transaction() {
         PaymentIdentification7 ids = new PaymentIdentification7();
         ids.setEndToEndId(endToEndId);
@@ -182,7 +164,6 @@ public record Pacs008(
         return agent;
     }
 
-    /** The schema also allows an account without an IBAN (Othr); our scheme does not. */
     private static String ibanOf(CashAccount38 account, String path) {
         return XML.required(XML.required(account, path).getId().getIBAN(), path + "/Id/IBAN");
     }
@@ -191,7 +172,6 @@ public record Pacs008(
         return XML.required(agent.getFinInstnId().getBICFI(), path + "/FinInstnId/BICFI");
     }
 
-    /** One line of unstructured remittance information, as the record holds. */
     private static String remittanceOf(RemittanceInformation16 remittance) {
         String path = TRANSACTION + "/RmtInf";
         return XML.single(XML.required(remittance, path).getUstrd(), path + "/Ustrd");

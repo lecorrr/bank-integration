@@ -1,21 +1,13 @@
 package dev.tkachuk.integration.outgoing;
 
-/**
- * Where a payment to another bank stands. SETTLED and REJECTED are final: only the other bank's answer leads to
- * them, and no later answer changes them.
- */
+/** Where a payment to another bank stands. SETTLED and REJECTED are final. */
 enum PaymentState {
 
-    /** Stored; RabbitMQ has not yet confirmed the pacs.008. */
-    NEW,
-    /** The pacs.008 is out and has no answer yet. */
-    SENT,
-    /** The other bank answered PDNG: it has the payment and has not decided. */
-    PENDING,
-    /** ACSC: the money is at the other bank. */
-    SETTLED,
-    /** RJCT: the other bank refused the payment. */
-    REJECTED;
+    NEW, // stored; screened or not, pacs.008 not confirmed yet
+    SENT, // pacs.008 out, no answer yet
+    PENDING, // the other bank answered PDNG
+    SETTLED, // ACSC
+    REJECTED; // RJCT, or refused by our bank
 
     boolean isFinal() {
         return this == SETTLED || this == REJECTED;

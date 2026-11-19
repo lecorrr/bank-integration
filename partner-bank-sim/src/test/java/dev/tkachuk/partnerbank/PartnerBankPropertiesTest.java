@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class PartnerBankPropertiesTest {
 
     @Test
-    void knowsItsClosedAndItsSilentAccounts() {
+    void shouldKnowClosedAndSilentAccounts() {
         PartnerBankProperties properties =
                 new PartnerBankProperties(List.of(TestPayments.CLOSED_ACCOUNT), List.of(TestPayments.SILENT_ACCOUNT));
 
@@ -24,7 +24,7 @@ class PartnerBankPropertiesTest {
     }
 
     @Test
-    void noListsMeanEveryAccountIsOpenAndAnswered() {
+    void shouldTreatEveryAccountAsOpenWithoutLists() {
         PartnerBankProperties properties = new PartnerBankProperties(null, null);
 
         assertThat(properties.isClosed(TestPayments.CLOSED_ACCOUNT)).isFalse();
@@ -38,7 +38,7 @@ class PartnerBankPropertiesTest {
             "UA84 3888 8800 0000 0000 0000 0099 9",
             "UA84",
             ""})
-    void refusesAnythingButAnIbanInCapitalsWithoutSpaces(String iban) {
+    void shouldRejectInvalidIban(String iban) {
         assertThatThrownBy(() -> new PartnerBankProperties(List.of(TestPayments.OPEN_ACCOUNT, iban), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("partner-bank.closed-accounts[1]");
@@ -48,14 +48,14 @@ class PartnerBankPropertiesTest {
     }
 
     @Test
-    void refusesAnEmptyLineInTheList() {
+    void shouldRejectEmptyEntry() {
         assertThatThrownBy(() -> new PartnerBankProperties(Arrays.asList((String) null), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("partner-bank.closed-accounts[0]");
     }
 
     @Test
-    void refusesAnAccountThatIsBothClosedAndSilent() {
+    void shouldRejectAccountBothClosedAndSilent() {
         List<String> closed = List.of(TestPayments.CLOSED_ACCOUNT);
         List<String> silent = List.of(TestPayments.SILENT_ACCOUNT, TestPayments.CLOSED_ACCOUNT);
 

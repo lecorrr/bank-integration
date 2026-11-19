@@ -10,7 +10,7 @@ class Pacs002Test {
     private static final String TRANSACTION = "/Document/FIToFIPmtStsRpt/TxInfAndSts";
 
     @Test
-    void answersAPaymentWithThatPaymentsIds() {
+    void shouldAnswerPaymentWithItsIds() {
         Pacs008 payment = TestMessages.pacs008();
 
         Pacs002 report = Pacs002.answering(payment, TransactionStatus.ACSC, "ANSWER-1", TestMessages.CREATED_AT);
@@ -22,7 +22,7 @@ class Pacs002Test {
     }
 
     @Test
-    void answersARequestAboutAPaymentNeverReceivedWithAg09AndTheRequestsIds() throws Exception {
+    void shouldAnswerAg09WithStatusRequestIds() throws Exception {
         Pacs028 request = TestMessages.pacs028();
 
         Pacs002 report = Pacs002.notReceived(request, "ANSWER-1", TestMessages.CREATED_AT);
@@ -37,7 +37,7 @@ class Pacs002Test {
     }
 
     @Test
-    void refusesTheMessageARequestAsksAboutWithTheRequestsIds() throws Exception {
+    void shouldRejectRequestedMessageWithStatusRequestIds() throws Exception {
         Pacs028 request = TestMessages.pacs028();
 
         Pacs002 report = Pacs002.rejecting(request, StatusReason.DUPLICATION, "ANSWER-1", TestMessages.CREATED_AT);
@@ -53,26 +53,25 @@ class Pacs002Test {
     }
 
     @Test
-    void repeatsAnAnswerUnderANewIdAndTime() {
+    void shouldRepeatAnswerWithNewIdAndTime() {
         Pacs002 first = Pacs002.rejecting(TestMessages.pacs008(), "AC04", "ANSWER-1", TestMessages.CREATED_AT);
 
         Pacs002 again = first.repeat("ANSWER-2", TestMessages.CREATED_AT.plusSeconds(90));
 
         assertThat(again.messageId()).isEqualTo("ANSWER-2");
         assertThat(again.createdAt()).isEqualTo(TestMessages.CREATED_AT.plusSeconds(90));
-        // Everything else is the same answer: given back the first id and time, it is the first report.
         assertThat(again.repeat(first.messageId(), first.createdAt())).isEqualTo(first);
     }
 
     @Test
-    void readsBackEveryFieldItWrites() {
+    void shouldReadBackEveryFieldItWrites() {
         Pacs002 report = answer(TransactionStatus.ACSC);
 
         assertThat(Pacs002.parse(report.toXml())).isEqualTo(report);
     }
 
     @Test
-    void aRejectionCarriesItsReasonThereAndBack() throws Exception {
+    void shouldKeepRejectionReasonInRoundTrip() throws Exception {
         Pacs002 report = Pacs002.rejecting(TestMessages.pacs008(), "AC04", "ANSWER-1", TestMessages.CREATED_AT);
         String xml = report.toXml();
 
@@ -83,7 +82,7 @@ class Pacs002Test {
     }
 
     @Test
-    void aReasonInTheBanksOwnWordsLeavesNoCode() {
+    void shouldReadProprietaryReasonWithoutCode() {
         String xml = Pacs002.rejecting(TestMessages.pacs008(), "AC04", "ANSWER-1", TestMessages.CREATED_AT).toXml()
                 .replace("<Cd>AC04</Cd>", "<Prtry>Account closed</Prtry>");
 
@@ -94,7 +93,7 @@ class Pacs002Test {
     }
 
     @Test
-    void aRejectionNeedsAReasonCodeOfOneToFourCharacters() {
+    void shouldRequireReasonCodeOfOneToFourCharacters() {
         Pacs008 payment = TestMessages.pacs008();
 
         for (String reason : new String[] {null, "", "AC045"}) {
@@ -106,7 +105,7 @@ class Pacs002Test {
     }
 
     @Test
-    void writesADocumentTheOfficialSchemaAccepts() throws Exception {
+    void shouldWriteDocumentThatPassesSchema() throws Exception {
         String xml = answer(TransactionStatus.ACSC).toXml();
 
         TestXml.validate(xml, Pacs002.MESSAGE_NAME);
@@ -117,7 +116,7 @@ class Pacs002Test {
     }
 
     @Test
-    void refusesAStatusOutsideTheCodesWeUse() {
+    void shouldRejectUnsupportedStatus() {
         String xml = answer(TransactionStatus.ACSC).toXml().replace("<TxSts>ACSC</TxSts>", "<TxSts>ACWP</TxSts>");
 
         assertThatThrownBy(() -> Pacs002.parse(xml))
@@ -126,7 +125,7 @@ class Pacs002Test {
     }
 
     @Test
-    void refusesAPacs008() {
+    void shouldRejectPacs008() {
         String pacs008 = TestMessages.pacs008().toXml();
 
         assertThatThrownBy(() -> Pacs002.parse(pacs008))
@@ -135,7 +134,7 @@ class Pacs002Test {
     }
 
     @Test
-    void refusesAReportWithoutAFieldWeRequire() {
+    void shouldRejectReportMissingRequiredField() {
         String xml = answer(TransactionStatus.ACSC).toXml().replaceFirst("\\s*<OrgnlUETR>[^<]*</OrgnlUETR>", "");
 
         assertThatThrownBy(() -> Pacs002.parse(xml))
@@ -144,7 +143,7 @@ class Pacs002Test {
     }
 
     @Test
-    void refusesAReportOnMoreThanOneTransaction() {
+    void shouldRejectReportOnMoreThanOneTransaction() {
         String xml = answer(TransactionStatus.ACSC).toXml();
         String end = "</TxInfAndSts>";
         String transaction = xml.substring(xml.indexOf("<TxInfAndSts>"), xml.indexOf(end) + end.length());

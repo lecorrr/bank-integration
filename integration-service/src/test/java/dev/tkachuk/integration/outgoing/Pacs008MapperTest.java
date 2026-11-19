@@ -27,7 +27,7 @@ class Pacs008MapperTest {
     private final Pacs008Mapper mapper = mapperAt(NOW);
 
     @Test
-    void copiesThePartiesTheAmountAndTheDescription() {
+    void shouldCopyPartiesAmountAndDescription() {
         TransferRequested transfer = TestTransfers.transfer();
 
         Pacs008 payment = mapper.toPacs008(transfer);
@@ -43,7 +43,7 @@ class Pacs008MapperTest {
     }
 
     @Test
-    void namesOurBankAndThePayeesBankByBic() {
+    void shouldSetBothBanksByBic() {
         Pacs008 payment = mapper.toPacs008(TestTransfers.transfer());
 
         assertThat(payment.debtorAgentBic()).isEqualTo("BNKCUAUKXXX");
@@ -51,7 +51,7 @@ class Pacs008MapperTest {
     }
 
     @Test
-    void takesEveryIdFromTheTransferId() {
+    void shouldDeriveIdsFromTransferId() {
         Pacs008 payment = mapper.toPacs008(TestTransfers.transfer());
 
         assertThat(payment.uetr()).isEqualTo("0f5bd7c2-3a4e-4c1b-9d0e-6f2a8b1c3d4e");
@@ -61,7 +61,7 @@ class Pacs008MapperTest {
     }
 
     @Test
-    void givesARedeliveredTransferTheSameIds() {
+    void shouldGiveSameIdsToRedeliveredTransfer() {
         TransferRequested transfer = TestTransfers.transfer();
 
         Pacs008 first = mapper.toPacs008(transfer);
@@ -72,22 +72,21 @@ class Pacs008MapperTest {
     }
 
     @Test
-    void settlesOnTheKyivBusinessDay() {
-        // 23:30 UTC on the 16th is already 01:30 on the 17th in Kyiv (UTC+2 in November).
+    void shouldUseKyivBusinessDayAsSettlementDate() {
         Pacs008 payment = mapperAt(Instant.parse("2026-11-16T23:30:00Z")).toPacs008(TestTransfers.transfer());
 
         assertThat(payment.settlementDate()).isEqualTo(LocalDate.parse("2026-11-17"));
     }
 
     @Test
-    void writesWholeHryvniaWithTwoDecimals() {
+    void shouldWriteAmountWithTwoDecimals() {
         Pacs008 payment = mapper.toPacs008(TestTransfers.builder().amount(new BigDecimal("150")).build());
 
         assertThat(payment.amount()).isEqualTo(new BigDecimal("150.00"));
     }
 
     @Test
-    void makesAPacs008TheSchemaAccepts() {
+    void shouldBuildPacs008ThatPassesSchema() {
         Pacs008 payment = mapper.toPacs008(TestTransfers.transfer());
 
         assertThat(Pacs008.parse(payment.toXml())).isEqualTo(payment);
@@ -96,7 +95,7 @@ class Pacs008MapperTest {
     static Stream<Arguments> transfersOurBankCannotSend() {
         return Stream.of(
                 refused("a payer at another bank", transfer -> transfer.fromIban("UA213888880000000000000000001"),
-                        "fromIban is an account at bank 388888"),
+                        "fromIban belongs to bank 388888"),
                 refused("a payee at our own bank", transfer -> transfer.toIban("UA213999990000000000000000002"),
                         "toIban is an account at our own bank"),
                 refused("a payee at a bank outside the directory",
@@ -108,7 +107,7 @@ class Pacs008MapperTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("transfersOurBankCannotSend")
-    void refusesATransferOurBankCannotSend(String transfer, UnaryOperator<TestTransfers.Builder> change,
+    void shouldRejectTransferThatCannotBeSent(String transfer, UnaryOperator<TestTransfers.Builder> change,
             String reason) {
         TransferRequested refused = change.apply(TestTransfers.builder()).build();
 

@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- The same Spring Boot as bank-core; Camel 4.22 is built against Spring Boot 4.1. -->
+    <!-- Same Spring Boot as bank-core; Camel 4.22 is built against Spring Boot 4.1. -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
@@ -14,7 +14,7 @@
 
     <groupId>dev.tkachuk</groupId>
     <artifactId>bank-integration</artifactId>
-    <version>0.6.1</version>
+    <version>0.7.3</version>
     <packaging>pom</packaging>
     <name>bank-integration</name>
     <description>Moves bank-core's payments to other banks as ISO 20022 messages over RabbitMQ and Kafka</description>
@@ -27,21 +27,23 @@
 
     <properties>
         <java.version>21</java.version>
-        <!-- Camel 4.22 is the LTS line, supported until August 2027. -->
+        <!-- LTS, supported until August 2027. -->
         <camel.version>4.22.2</camel.version>
-        <!-- Its xjc is JAXB 4.0.9, the same version as the runtime that Spring Boot manages. -->
+        <!-- Its xjc is JAXB 4.0.9, the runtime version Spring Boot manages. -->
         <jaxb-maven-plugin.version>4.0.16</jaxb-maven-plugin.version>
-        <!-- The Kafka client Camel 4.22 is built with; Spring Boot 4.1.2 would otherwise pick 4.2.2. -->
+        <!-- The Kafka client Camel 4.22 is built with; Spring Boot would pick 4.2.2. -->
         <kafka.version>4.3.1</kafka.version>
-        <!-- One image each for the integration tests; compose.yaml uses the same tags. -->
+        <resilience4j.version>2.4.0</resilience4j.version>
+        <!-- Standalone jar: it shades its own Jetty and Jackson. 4.x is still beta. -->
+        <wiremock.version>3.13.2</wiremock.version>
+        <!-- Testcontainers images; compose.yaml uses the same tags. -->
         <rabbitmq.image>rabbitmq:4.3-management-alpine</rabbitmq.image>
         <kafka.image>apache/kafka-native:4.4.0</kafka.image>
         <postgres.image>postgres:17-alpine</postgres.image>
         <jacoco.version>0.8.13</jacoco.version>
-        <!-- Line coverage every module must reach, unit and integration tests together; generated code excluded. -->
+        <!-- Line coverage per module, unit and integration tests together. -->
         <coverage.minimum>0.80</coverage.minimum>
-        <!-- The test JVMs load Mockito as an agent at start: attaching it later, as it does by itself, is what
-             newer JDKs warn about and will forbid. JaCoCo puts its own agent in front (prepare-agent). -->
+        <!-- Load Mockito as an agent at startup; newer JDKs warn about attaching it later. -->
         <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</argLine>
     </properties>
 
@@ -59,14 +61,23 @@
                 <artifactId>interbank-contract</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-circuitbreaker</artifactId>
+                <version>${resilience4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.wiremock</groupId>
+                <artifactId>wiremock-standalone</artifactId>
+                <version>${wiremock.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
     <build>
         <pluginManagement>
             <plugins>
-                <!-- The image reaches the tests as a system property, so the tag lives here only.
-                     Surefire carries it too because IntelliJ copies Surefire's settings into its test runs. -->
+                <!-- Surefire gets the images too, since IntelliJ runs tests with Surefire's settings. -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
@@ -92,13 +103,12 @@
             </plugins>
         </pluginManagement>
         <plugins>
-            <!-- Unit tests (*Test) run in the test phase, integration tests (*IT) in verify. -->
+            <!-- *Test in the test phase, *IT in verify. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
             </plugin>
-            <!-- Coverage of each module from its unit and integration tests together, as in bank-core: the
-                 report is target/site/jacoco/index.html, and verify fails below coverage.minimum. -->
+            <!-- Report in target/site/jacoco/index.html; verify fails below coverage.minimum. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -155,6 +165,7 @@
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <excludes>
                                 <exclude>dev/tkachuk/interbank/iso20022/pacs*/**</exclude>
+                                <exclude>dev/tkachuk/integration/screening/soap/**</exclude>
                             </excludes>
                         </configuration>
                     </execution>
@@ -166,9 +177,10 @@
                         </goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
-                            <!-- The classes xjc generates from the schemas: getters and setters, mostly unused. -->
+                            <!-- Generated JAXB classes. -->
                             <excludes>
                                 <exclude>dev/tkachuk/interbank/iso20022/pacs*/**</exclude>
+                                <exclude>dev/tkachuk/integration/screening/soap/**</exclude>
                             </excludes>
                             <rules>
                                 <rule>

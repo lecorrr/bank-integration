@@ -9,11 +9,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-/**
- * One PostgreSQL for the repository tests, which need no Spring context: started at its first use, with the schema
- * Flyway builds from the migrations, as when the service starts. It is never stopped by hand; Testcontainers
- * removes it once the tests are over (the singleton container pattern). Each test empties its own table.
- */
+/** A migrated PostgreSQL for the repository tests, without Spring. */
 public final class TestDatabase {
 
     private static final PostgreSQLContainer POSTGRES = startAndMigrate();
@@ -26,7 +22,6 @@ public final class TestDatabase {
         return JDBC;
     }
 
-    /** A connection of its own, as another instance of the service would have; the caller closes it. */
     public static Connection connect() throws SQLException {
         return DriverManager.getConnection(POSTGRES.getJdbcUrl(), driverProperties());
     }
@@ -51,7 +46,7 @@ public final class TestDatabase {
         Properties properties = new Properties();
         properties.setProperty("user", POSTGRES.getUsername());
         properties.setProperty("password", POSTGRES.getPassword());
-        // A statement that waits on a lock fails after 5 seconds instead of hanging the test.
+        // A test stuck on a row lock fails after 5 s instead of hanging.
         properties.setProperty("options", "-c statement_timeout=5000");
         return properties;
     }

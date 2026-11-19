@@ -5,53 +5,45 @@ import static dev.tkachuk.interbank.InterbankTopology.PARTNER_PACS008;
 import dev.tkachuk.integration.events.EventJson;
 import dev.tkachuk.integration.events.InvalidEventException;
 import dev.tkachuk.integration.messaging.Routes;
+import dev.tkachuk.integration.screening.SanctionsScreening;
+import dev.tkachuk.integration.screening.Screening;
+import dev.tkachuk.integration.screening.ScreeningRefusedException;
 import dev.tkachuk.interbank.iso20022.InvalidMessageException;
 import dev.tkachuk.interbank.iso20022.Pacs008;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.springframework.stereotype.Component;
 
 /**
- * Flow A, first leg: bank-core's transfer event comes from Kafka, the payment is stored, and its pacs.008 goes
- * out over RabbitMQ. The answers come back through AnswerRoute.
- *
- * <p>At least once, and a repeat is harmless. The route commits the event's Kafka offset itself, as its last
- * step, once the payment is stored and RabbitMQ has confirmed the pacs.008 (Routes.fromKafka says why not
- * auto-commit). A crash before that brings the event again; the stored payment is found, and sent only if it
- * never went out. Should the other bank get the same pacs.008 twice all the same, it drops the copy by its MsgId.
- * A transfer that has a row is never decided again, so a repeated event cannot turn a payment sent into a
- * refusal, or the other way round. A failed step is retried in rounds (Routes.retryInRounds) until it works.
- *
- * <p>Two failures are final and not retried: an event that is not a valid TransferRequested goes to the
- * dead-letter topic as it came, and a transfer our bank cannot send goes back to bank-core as REJECTED, and is
- * then kept as rejected (bank-core first, as in AnswerRoute, so a crash in between repeats the event).
+ * Flow A: bank-core's transfer event becomes a stored payment, is screened, and goes out as a pacs.008. The Kafka
+ * offset is committed last, so after a crash the event comes again and the payment continues from its stored state.
  */
 @Component
 class TransferRoute extends RouteBuilder {
 
-    /** Where an event that is not a valid TransferRequested goes, as it came; Spring Kafka's naming. */
     static final String DEAD_LETTER_TOPIC = TransferRequested.TOPIC + ".DLT";
 
-    /** The payment as stored. */
     private static final String PAYMENT = "payment";
-    /** Our bank's refusal, as bank-core hears of it. */
     private static final String REFUSAL = "refusal";
 
     private final EventJson json;
     private final Pacs008Mapper mapper;
     private final OutgoingPayments payments;
     private final StatusRequestPolicy policy;
+    private final SanctionsScreening screening;
     private final Clock clock;
 
     TransferRoute(EventJson json, Pacs008Mapper mapper, OutgoingPayments payments, StatusRequestPolicy policy,
-            Clock clock) {
+            SanctionsScreening screening, Clock clock) {
         this.json = json;
         this.mapper = mapper;
         this.payments = payments;
         this.policy = policy;
+        this.screening = screening;
         this.clock = clock;
     }
 
@@ -59,7 +51,7 @@ class TransferRoute extends RouteBuilder {
     public void configure() {
         errorHandler(Routes.retryInRounds(defaultErrorHandler()));
 
-        onException(InvalidEventException.class)
+        onException(InvalidEventException.class, ScreeningRefusedException.class)
                 .handled(true)
                 .maximumRedeliveries(0)
                 .useOriginalMessage()
@@ -79,45 +71,65 @@ class TransferRoute extends RouteBuilder {
                 .routeId("transfer-to-pacs008")
                 .process(Routes::keepOffsetCommit)
                 .process(this::store)
-                .filter(TransferRoute::notSentYet)
-                    .process(this::toPacs008Message)
-                    .to(Routes.toQueue(PARTNER_PACS008))
-                    .process(this::recordSent)
+                .process(this::screen)
+                .choice()
+                    .when(TransferRoute::clearToSend)
+                        .process(this::toPacs008Message)
+                        .to(Routes.toQueue(PARTNER_PACS008))
+                        .process(this::recordSent)
+                    .when(TransferRoute::onASanctionsList)
+                        .process(this::toSanctionsRefusal)
+                        .to(Routes.toKafka(TransferStatusChanged.TOPIC))
+                        .process(this::recordSanctionsRefusal)
                 .end()
                 .process(Routes::commitOffset);
     }
 
-    /** Reads the event and finds its payment, or makes the pacs.008 and stores it as NEW. */
     private void store(Exchange exchange) {
         TransferRequested transfer = json.read(exchange.getMessage().getBody(String.class), TransferRequested.class);
         OutgoingPayment stored = payments.find(transfer.transferId()).orElseGet(() -> storeNew(transfer));
         if (stored.state() != PaymentState.NEW) {
-            log.info("Transfer {} came again; it was decided on already and is {}", transfer.transferId(),
-                    stored.state());
+            log.info("Transfer {} received again, already {}", transfer.transferId(), stored.state());
         }
         exchange.setProperty(PAYMENT, stored);
     }
 
-    /** @throws TransferRefusedException when our bank cannot send the transfer */
     private OutgoingPayment storeNew(TransferRequested transfer) {
         Pacs008 payment = mapper.toPacs008(transfer);
         return payments.insertIfAbsent(transfer.transferId(), payment.messageId(), xmlOf(transfer, payment),
                 clock.instant());
     }
 
-    /** A transfer that cannot make a valid pacs.008 cannot be sent at all: a refusal, not a failure to retry. */
     private static String xmlOf(TransferRequested transfer, Pacs008 payment) {
         try {
             return payment.toXml();
         } catch (InvalidMessageException e) {
-            throw new TransferRefusedException(transfer.transferId(),
-                    "its pacs.008 would be invalid: " + e.getMessage());
+            throw new TransferRefusedException(transfer.transferId(), "invalid pacs.008: " + e.getMessage());
         }
     }
 
-    /** NEW: stored, and RabbitMQ has not confirmed its pacs.008, either just now or before a crash. */
-    private static boolean notSentYet(Exchange exchange) {
-        return paymentOf(exchange).state() == PaymentState.NEW;
+    private void screen(Exchange exchange) {
+        OutgoingPayment payment = paymentOf(exchange);
+        if (payment.state() != PaymentState.NEW || payment.screening() != null) {
+            return;
+        }
+        Screening answer = screening.screenOutgoing(Pacs008.parse(payment.pacs008()));
+        OutgoingPayment screened = payments.recordScreening(payment.transferId(), answer);
+        if (screened.screening().cleared()) {
+            log.info("Transfer {} passed sanctions screening {}", screened.transferId(),
+                    screened.screening().screeningId());
+        }
+        exchange.setProperty(PAYMENT, screened);
+    }
+
+    private static boolean clearToSend(Exchange exchange) {
+        OutgoingPayment payment = paymentOf(exchange);
+        return payment.state() == PaymentState.NEW && payment.screening().cleared();
+    }
+
+    private static boolean onASanctionsList(Exchange exchange) {
+        OutgoingPayment payment = paymentOf(exchange);
+        return payment.state() == PaymentState.NEW && !payment.screening().cleared();
     }
 
     private void toPacs008Message(Exchange exchange) {
@@ -133,26 +145,44 @@ class TransferRoute extends RouteBuilder {
 
     private void toDeadLetter(Exchange exchange) {
         String origin = Routes.asKafkaDeadLetter(exchange);
-        log.error("The event at {} is not a valid TransferRequested; it goes to {} for a person to look at: {}",
-                origin, DEAD_LETTER_TOPIC, Routes.failureOf(exchange));
+        log.error("Moving event {} to {}: {}", origin, DEAD_LETTER_TOPIC, Routes.failureOf(exchange));
     }
 
-    /** REJECTED for bank-core, under an id of its own: no other bank's report decided it. */
     private void toRefusal(Exchange exchange) {
         TransferRefusedException refusal =
                 exchange.getProperty(Exchange.EXCEPTION_CAUGHT, TransferRefusedException.class);
-        TransferStatusChanged rejected = new TransferStatusChanged(refusal.transferId(), TransferStatus.REJECTED,
-                Routes.newMessageId(), clock.instant().truncatedTo(ChronoUnit.SECONDS));
-        log.warn("{}; reported to bank-core as REJECTED (report {})", refusal.getMessage(), rejected.reportId());
-        exchange.setProperty(REFUSAL, rejected);
-        // Keyed by transfer, like every status, so the statuses of one transfer stay in order.
-        Routes.asKafkaEvent(exchange, rejected.transferId().toString(), json.write(rejected));
+        TransferStatusChanged rejected = rejectedByOurBank(refusal.transferId());
+        log.warn("{}, reported as REJECTED (report {})", refusal.getMessage(), rejected.reportId());
+        toBankCore(exchange, rejected);
     }
 
     private void recordRefusal(Exchange exchange) {
         TransferStatusChanged rejected = exchange.getProperty(REFUSAL, TransferStatusChanged.class);
         payments.recordRefusal(rejected.transferId(), Pacs008Mapper.messageIdOf(rejected.transferId()),
                 rejected.reportId(), rejected.reportedAt());
+    }
+
+    private void toSanctionsRefusal(Exchange exchange) {
+        OutgoingPayment payment = paymentOf(exchange);
+        TransferStatusChanged rejected = rejectedByOurBank(payment.transferId());
+        log.warn("Transfer {} refused: sanctions hit (screening {}), reported as REJECTED (report {})",
+                payment.transferId(), payment.screening().screeningId(), rejected.reportId());
+        toBankCore(exchange, rejected);
+    }
+
+    private void recordSanctionsRefusal(Exchange exchange) {
+        TransferStatusChanged rejected = exchange.getProperty(REFUSAL, TransferStatusChanged.class);
+        payments.recordSanctionsRefusal(rejected.transferId(), rejected.reportId(), rejected.reportedAt());
+    }
+
+    private TransferStatusChanged rejectedByOurBank(UUID transferId) {
+        return new TransferStatusChanged(transferId, TransferStatus.REJECTED, Routes.newMessageId(),
+                clock.instant().truncatedTo(ChronoUnit.SECONDS));
+    }
+
+    private void toBankCore(Exchange exchange, TransferStatusChanged rejected) {
+        exchange.setProperty(REFUSAL, rejected);
+        Routes.asKafkaEvent(exchange, rejected.transferId().toString(), json.write(rejected));
     }
 
     private static OutgoingPayment paymentOf(Exchange exchange) {

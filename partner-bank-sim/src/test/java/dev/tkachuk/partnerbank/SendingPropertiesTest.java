@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class SendingPropertiesTest {
 
     @Test
-    void takesTheSettingsOfApplicationYml() {
+    void shouldLoadApplicationYmlSettings() {
         SendingProperties sending = new SendingProperties("PRTBUAUKXXX", TestPayments.OPEN_ACCOUNT,
                 "Olena Kovalenko", "BNKCUAUKXXX");
 
@@ -35,7 +35,7 @@ class SendingPropertiesTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("wrongSettings")
-    void refusesAWrongSettingAndNamesIt(String setting, String bic, String customerIban, String customerName,
+    void shouldRejectInvalidSettingAndNameIt(String setting, String bic, String customerIban, String customerName,
             String payeeBankBic, String named) {
         assertThatThrownBy(() -> new SendingProperties(bic, customerIban, customerName, payeeBankBic))
                 .isInstanceOf(IllegalArgumentException.class)

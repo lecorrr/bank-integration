@@ -1,9 +1,6 @@
 package dev.tkachuk.integration.events;
 
-/**
- * An event on Kafka that is not JSON, or breaks the rules of its type. It names the field and the rule but never
- * quotes personal data such as names and IBANs.
- */
+/** A Kafka event that cannot be read or breaks its record's rules. */
 public class InvalidEventException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;

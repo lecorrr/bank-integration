@@ -1,0 +1,28 @@
+{
+  "name": "A listed payer: a hit",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "url": "/ws/screening",
+    "headers": {
+      "SOAPAction": {
+        "contains": "urn:bank-integration:sanctions-screening:1:ScreenPayment"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matchesXPath": "/Envelope/Body/ScreenPaymentRequest/Party[Role='DEBTOR'][Name='Sanctioned Test Entity']"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/xml; charset=utf-8"
+    },
+    "bodyFileName": "screen-payment-hit-debtor.xml",
+    "transformers": [
+      "response-template"
+    ]
+  }
+}

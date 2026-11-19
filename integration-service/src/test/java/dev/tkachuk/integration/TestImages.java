@@ -1,12 +1,11 @@
 package dev.tkachuk.integration;
 
-/** The Docker images the integration tests run. pom.xml passes in their tags, so each tag lives in one place. */
+/** Image tags are set once in pom.xml and passed to the tests as system properties. */
 public final class TestImages {
 
     private TestImages() {
     }
 
-    /** @param property rabbitmq.image, kafka.image or postgres.image */
     public static String fromSystemProperty(String property) {
         String image = System.getProperty(property);
         if (image == null || image.isBlank()) {

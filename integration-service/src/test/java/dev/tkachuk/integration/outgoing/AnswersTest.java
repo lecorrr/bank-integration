@@ -13,11 +13,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 class AnswersTest {
 
-    /** Every reason code that changes a decision, and none at all. */
     private static final String[] REASONS = {null, StatusReason.CLOSED_ACCOUNT, StatusReason.PAYMENT_NOT_RECEIVED,
             StatusReason.DUPLICATION};
 
-    /** "-" stands for an answer without a reason code. */
     @ParameterizedTest(name = "{0}, answer {1} {2}: {3}")
     @CsvSource({
             "NEW, ACSC, -, SETTLE",
@@ -41,13 +39,13 @@ class AnswersTest {
             "REJECTED, RJCT, AG09, IGNORE",
             "REJECTED, PDNG, -, IGNORE",
             "REJECTED, ACSC, -, CONFLICT"})
-    void decidesByThePaymentsStateAndTheAnswer(PaymentState state, TransactionStatus status, String reason,
+    void shouldDecideByPaymentStateAndAnswer(PaymentState state, TransactionStatus status, String reason,
             Action expected) {
         assertThat(Answers.decide(state, answer(status, "-".equals(reason) ? null : reason))).isEqualTo(expected);
     }
 
     @Test
-    void givesTheMoneyBackOnlyForADefiniteRefusalOfAnOpenPayment() {
+    void shouldRejectOnlyOnDefiniteRefusalOfOpenPayment() {
         for (PaymentState state : PaymentState.values()) {
             for (TransactionStatus status : TransactionStatus.values()) {
                 for (String reason : REASONS) {
@@ -65,7 +63,7 @@ class AnswersTest {
     }
 
     @Test
-    void neverSendsAPaymentWithAFinalAnswerAgain() {
+    void shouldNeverResendPaymentWithFinalAnswer() {
         for (PaymentState state : new PaymentState[] {PaymentState.SETTLED, PaymentState.REJECTED}) {
             for (TransactionStatus status : TransactionStatus.values()) {
                 for (String reason : REASONS) {

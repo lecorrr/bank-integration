@@ -1,6 +1,4 @@
-# The whole Project 2 stack on the desktop. Every port is published on localhost only.
-#   infrastructure only:  docker compose up -d postgres rabbitmq kafka sftp
-#   everything:           ./mvnw -DskipTests package && docker compose up -d --build
+# Local stack for bank-integration. Every port is published on localhost only.
 name: bank-integration
 
 services:
@@ -10,11 +8,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      # 5435: 5432 is a native PostgreSQL, 5433 another project's, 5434 bank-core's own compose database.
-      - "127.0.0.1:5435:5432"
+      - "127.0.0.1:5435:5432"   # 5432-5434 are taken by other databases, bank-core's included
     volumes:
       - integration-db:/var/lib/postgresql/data
-      # Runs once, on an empty volume: a database and an owner each for bank-core and bank-integration.
+      # Runs once on an empty volume: creates the bank-core and integration databases.
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     mem_limit: 256m
     healthcheck:
@@ -24,12 +21,11 @@ services:
       retries: 12
 
   rabbitmq:
-    image: rabbitmq:4.3-management-alpine   # the same tag as rabbitmq.image in pom.xml
-    # RabbitMQ keeps its data per node name, and the node name comes from the hostname.
-    hostname: rabbitmq
+    image: rabbitmq:4.3-management-alpine   # same tag as rabbitmq.image in pom.xml
+    hostname: rabbitmq   # RabbitMQ keeps its data per node name, which comes from the hostname
     ports:
       - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"   # management UI, user interbank / interbank
+      - "127.0.0.1:15672:15672"   # management UI, interbank / interbank
     volumes:
       - ./docker/rabbitmq/20-interbank.conf:/etc/rabbitmq/conf.d/20-interbank.conf:ro
       - rabbitmq-data:/var/lib/rabbitmq
@@ -45,8 +41,7 @@ services:
     hostname: kafka
     ports:
       - "127.0.0.1:9092:9092"
-    # One node that is both broker and KRaft controller, from Kafka's own single-node example. Programs on the
-    # desktop connect to localhost:9092, containers in this stack to kafka:19092.
+    # Single node, broker and controller. The host connects to localhost:9092, containers to kafka:19092.
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -56,18 +51,16 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      CLUSTER_ID: YmFuay1pbnRlZ3JhdGlvbg   # 16 bytes, base64: "bank-integration"
+      CLUSTER_ID: YmFuay1pbnRlZ3JhdGlvbg   # "bank-integration" in base64
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
-      # Inside the container: docker compose stop keeps the events, docker compose down empties Kafka. A demo
-      # stack needs no more; bank-core's outbox keeps what it has not published yet.
+      # No volume: "docker compose down" empties Kafka, which is fine for a demo.
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
-      # Every message goes to disk before Kafka confirms it. One broker has no copy elsewhere, so without this
-      # a power cut could lose events Kafka had already confirmed.
+      # With one broker there is no replica, so write every message to disk before acknowledging it.
       KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 1
     mem_limit: 512m
 
@@ -75,9 +68,23 @@ services:
     image: atmoz/sftp:alpine
     ports:
       - "127.0.0.1:2222:22"
-    # user:password:uid:gid:folder. The partner bank drops its account statements (camt.053) here in step 7.
+    # user:password:uid:gid:folder; camt.053 statements go here (step 7)
     command: partner:partner:1001:1001:statements
     mem_limit: 64m
+
+  # Stand-in for the sanctions screening service: WireMock with the test stubs.
+  # The one listed name is "Sanctioned Test Entity".
+  sanctions-screening:
+    image: wiremock/wiremock:3.13.2
+    # Outside /home/wiremock, which the image's entrypoint may try to chown.
+    command: ["--root-dir", "/stubs", "--disable-banner"]
+    volumes:
+      - ./integration-service/src/test/resources/sanctions-screening:/stubs:ro
+    ports:
+      - "127.0.0.1:8084:8080"
+    environment:
+      JAVA_OPTS: "-XX:MaxRAMPercentage=50"
+    mem_limit: 384m
 
   integration-service:
     build: ./integration-service
@@ -89,17 +96,18 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      sanctions-screening:   # not required to be up: payments wait until screening answers
+        condition: service_started
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/integration
       RABBITMQ_HOST: rabbitmq
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
-      # JSON logs in Elastic Common Schema, ready for ELK in Project 3.
-      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+      SANCTIONS_SCREENING_URL: http://sanctions-screening:8080/ws/screening
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs   # JSON logs for ELK (Project 3)
     ports:
       - "127.0.0.1:8082:8082"
-    # Stopping takes a few seconds: Camel finishes the messages in hand. A service killed before that loses
-    # nothing either, since an event is committed only once its payment is stored and sent; it just sends the
-    # payment in hand again after the restart, which the partner bank answers as before.
+    # Camel finishes the messages in hand on shutdown. A kill loses nothing either: the unfinished payment is
+    # sent again after the restart and the partner bank repeats its answer.
     stop_grace_period: 30s
     mem_limit: 768m
 

@@ -8,15 +8,13 @@ import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
-/** A payment from a customer of the partner bank to one of ours, which tests change one field at a time. */
+/** A valid pacs.008 from the partner bank to one of our accounts; tests change one field at a time. */
 public final class TestPayments {
 
-    /** Our bank and the partner bank, as application.yml sets them. */
     public static final InterbankProperties BANK =
             new InterbankProperties("399999", "BNKCUAUKXXX", Map.of("388888", "PRTBUAUKXXX"));
     public static final String UETR = "3b9f7a52-1c4d-4e8f-a0b6-7d2e5c9f1a34";
     public static final String MESSAGE_ID = "PRTB20261118091500000001";
-    /** At the partner bank (code 388888) and at ours (399999); both are valid IBANs. */
     public static final String PARTNER_CUSTOMER = "UA643888880000000000000000777";
     public static final String OUR_CUSTOMER = "UA843999990000000000000000001";
     public static final Instant SENT_AT = Instant.parse("2026-11-18T09:15:00Z");
@@ -32,7 +30,6 @@ public final class TestPayments {
         return new Builder();
     }
 
-    /** A new payment: its own UETR and MsgId, everything else as in payment(). */
     public static Builder another() {
         UUID uetr = UUID.randomUUID();
         return builder().uetr(uetr.toString()).messageId(uetr.toString().replace("-", ""));
@@ -48,6 +45,9 @@ public final class TestPayments {
         private String debtorAgentBic = "PRTBUAUKXXX";
         private String creditorIban = OUR_CUSTOMER;
         private String creditorAgentBic = "BNKCUAUKXXX";
+        private String debtorName = "Olena Kovalenko";
+        private String creditorName = "Artem Demo";
+        private String remittanceInformation = "For the concert tickets";
 
         public Builder messageId(String value) {
             messageId = value;
@@ -89,10 +89,25 @@ public final class TestPayments {
             return this;
         }
 
+        public Builder debtorName(String value) {
+            debtorName = value;
+            return this;
+        }
+
+        public Builder creditorName(String value) {
+            creditorName = value;
+            return this;
+        }
+
+        public Builder remittanceInformation(String value) {
+            remittanceInformation = value;
+            return this;
+        }
+
         public Pacs008 build() {
             return new Pacs008(messageId, SENT_AT, "NOTPROVIDED", messageId, uetr, amount, currency,
-                    LocalDate.of(2026, 11, 18), "Olena Kovalenko", debtorIban, debtorAgentBic, "Artem Demo",
-                    creditorIban, creditorAgentBic, "For the concert tickets");
+                    LocalDate.of(2026, 11, 18), debtorName, debtorIban, debtorAgentBic, creditorName,
+                    creditorIban, creditorAgentBic, remittanceInformation);
         }
     }
 }

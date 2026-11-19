@@ -16,13 +16,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 class IncomingChecksTest {
 
     @Test
-    void takesAPaymentInHryvniaFromAParticipantToOneOfOurAccounts() {
+    void shouldAcceptValidPayment() {
         assertThat(IncomingChecks.refusalOf(TestPayments.payment(), TestPayments.BANK)).isEmpty();
     }
 
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {"250", "250.5", "250.50", "250.500"})
-    void takesAnAmountOfWholeKopiyky(String amount) {
+    void shouldAcceptAmountInWholeKopiyky(String amount) {
         Pacs008 payment = TestPayments.builder().amount(amount).build();
 
         assertThat(IncomingChecks.refusalOf(payment, TestPayments.BANK)).isEmpty();
@@ -50,7 +50,7 @@ class IncomingChecksTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("refusals")
-    void refusesAPaymentThatBreaksARuleWithTheRulesReason(String payment, TestPayments.Builder builder,
+    void shouldRejectPaymentWithReasonOfBrokenRule(String payment, TestPayments.Builder builder,
             String reasonCode) {
         Optional<Refusal> refusal = IncomingChecks.refusalOf(builder.build(), TestPayments.BANK);
 
@@ -60,7 +60,7 @@ class IncomingChecksTest {
     }
 
     @Test
-    void theReasonInWordsNamesNoAccount() {
+    void shouldNotQuoteAccountsInReason() {
         Pacs008 payment = TestPayments.builder().creditorIban("UA643888880000000000000000777").build();
 
         String reason = IncomingChecks.refusalOf(payment, TestPayments.BANK).orElseThrow().reason();
@@ -69,7 +69,7 @@ class IncomingChecksTest {
     }
 
     @Test
-    void theFirstRuleBrokenDecides() {
+    void shouldUseFirstBrokenRule() {
         Pacs008 payment = TestPayments.builder().creditorAgentBic("PRTBUAUKXXX").currency("USD").build();
 
         assertThat(IncomingChecks.refusalOf(payment, TestPayments.BANK).orElseThrow().reasonCode())

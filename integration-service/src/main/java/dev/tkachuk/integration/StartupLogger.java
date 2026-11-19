@@ -8,7 +8,7 @@ import org.springframework.boot.info.BuildProperties;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-/** Prints the running version, so a log line always says which build is answering. */
+/** Logs the version at startup, so the logs show which build is running. */
 @Component
 class StartupLogger {
 

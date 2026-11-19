@@ -25,7 +25,7 @@ class StatusReportsTest {
     private final StatusReports statusReports = new StatusReports(CLOCK, ACCOUNTS);
 
     @Test
-    void acceptsAValidPaymentAndRepeatsItsIds() {
+    void shouldAcceptPaymentWithItsIds() {
         Pacs008 payment = TestPayments.pacs008("MSG-1");
 
         Pacs002 report = statusReports.answerPayment(payment.toXml()).orElseThrow();
@@ -38,7 +38,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void refusesAPaymentToAClosedAccountSayingWhy() {
+    void shouldRejectPaymentToClosedAccountWithAc04() {
         Pacs008 payment = TestPayments.pacs008("MSG-1", TestPayments.CLOSED_ACCOUNT);
 
         Pacs002 report = statusReports.answerPayment(payment.toXml()).orElseThrow();
@@ -49,14 +49,14 @@ class StatusReportsTest {
     }
 
     @Test
-    void leavesAPaymentToASilentAccountWithoutAnAnswer() {
+    void shouldNotAnswerPaymentToSilentAccount() {
         Pacs008 payment = TestPayments.pacs008("MSG-1", TestPayments.SILENT_ACCOUNT);
 
         assertThat(statusReports.answerPayment(payment.toXml())).isEmpty();
     }
 
     @Test
-    void givesEveryAnswerItsOwnMessageId() {
+    void shouldGiveEveryAnswerNewMessageId() {
         Pacs002 first = statusReports.answerPayment(TestPayments.pacs008("MSG-1").toXml()).orElseThrow();
         Pacs002 second = statusReports.answerPayment(TestPayments.pacs008("MSG-2").toXml()).orElseThrow();
 
@@ -64,7 +64,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void answersADuplicateAsBeforeInsteadOfTakingASecondPayment() {
+    void shouldRepeatAnswerForDuplicate() {
         String xml = TestPayments.pacs008("MSG-1", TestPayments.CLOSED_ACCOUNT).toXml();
         Pacs002 first = statusReports.answerPayment(xml).orElseThrow();
 
@@ -75,7 +75,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void knowsACopyByItsMsgIdWhateverElseItCarries() {
+    void shouldDetectDuplicateByMsgId() {
         statusReports.answerPayment(TestPayments.pacs008("MSG-1", TestPayments.OPEN_ACCOUNT).toXml());
 
         Pacs002 again = statusReports.answerPayment(TestPayments.pacs008("MSG-1", TestPayments.CLOSED_ACCOUNT).toXml())
@@ -86,7 +86,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void leavesADuplicateOfASilentPaymentWithoutAnAnswerToo() {
+    void shouldNotAnswerDuplicateOfSilentPayment() {
         String xml = TestPayments.pacs008("MSG-1", TestPayments.SILENT_ACCOUNT).toXml();
         statusReports.answerPayment(xml);
 
@@ -94,7 +94,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void answersAStatusRequestWithThePaymentsOwnAnswer() {
+    void shouldAnswerStatusRequestWithPaymentAnswer() {
         Pacs008 payment = TestPayments.pacs008("MSG-1", TestPayments.CLOSED_ACCOUNT);
         Pacs002 first = statusReports.answerPayment(payment.toXml()).orElseThrow();
 
@@ -105,7 +105,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void answersAStatusRequestAboutAPaymentWithoutAnAnswerWithPending() {
+    void shouldAnswerPendingForUnansweredPayment() {
         Pacs008 payment = TestPayments.pacs008("MSG-1", TestPayments.SILENT_ACCOUNT);
         statusReports.answerPayment(payment.toXml());
 
@@ -116,7 +116,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void answersAStatusRequestAboutAPaymentItNeverReceivedWithAg09() {
+    void shouldAnswerAg09ForUnknownPayment() {
         Pacs008 neverSent = TestPayments.pacs008("MSG-LOST");
 
         Pacs002 answer = statusReports.answerStatusRequest(statusRequestAbout(neverSent).toXml());
@@ -128,7 +128,7 @@ class StatusReportsTest {
     }
 
     @Test
-    void forgetsTheOldestPaymentOnceItsMemoryIsFull() {
+    void shouldForgetOldestPaymentWhenFull() {
         StatusReports smallMemory = new StatusReports(CLOCK, ACCOUNTS, 2);
         Pacs008 oldest = TestPayments.pacs008("MSG-1");
         smallMemory.answerPayment(oldest.toXml());
@@ -141,13 +141,13 @@ class StatusReportsTest {
     }
 
     @Test
-    void refusesAnythingThatIsNotAPacs008() {
+    void shouldRejectAnythingButPacs008() {
         assertThatThrownBy(() -> statusReports.answerPayment("<Document/>"))
                 .isInstanceOf(InvalidMessageException.class);
     }
 
     @Test
-    void refusesAStatusRequestThatIsNotAPacs028() {
+    void shouldRejectStatusRequestThatIsNotPacs028() {
         String pacs008 = TestPayments.pacs008("MSG-1").toXml();
 
         assertThatThrownBy(() -> statusReports.answerStatusRequest(pacs008))

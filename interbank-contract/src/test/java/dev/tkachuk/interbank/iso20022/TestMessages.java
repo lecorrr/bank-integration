@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
-/** Valid messages for tests: bank-core's demo account A pays a customer of the partner bank. */
+/** Valid messages for the tests. */
 final class TestMessages {
 
     static final Instant CREATED_AT = Instant.parse("2026-11-17T08:30:00Z");
@@ -16,7 +16,6 @@ final class TestMessages {
         return pacs008("Olena Kovalenko");
     }
 
-    /** Our bank asks the partner bank about that payment a minute after sending it. */
     static Pacs028 pacs028() {
         return Pacs028.about(pacs008(), "STATUS-REQUEST-1", CREATED_AT.plusSeconds(60));
     }

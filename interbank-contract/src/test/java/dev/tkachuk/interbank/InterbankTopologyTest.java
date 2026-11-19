@@ -14,7 +14,7 @@ class InterbankTopologyTest {
     private final Declarables topology = InterbankTopology.declarables();
 
     @Test
-    void declaresOneDurableDirectExchange() {
+    void shouldDeclareOneDurableDirectExchange() {
         List<DirectExchange> exchanges = topology.getDeclarablesByType(DirectExchange.class);
 
         assertThat(exchanges).hasSize(1);
@@ -23,7 +23,7 @@ class InterbankTopologyTest {
     }
 
     @Test
-    void everyQueueIsADurableQuorumQueue() {
+    void shouldDeclareDurableQuorumQueues() {
         List<Queue> queues = topology.getDeclarablesByType(Queue.class);
 
         assertThat(queues).extracting(Queue::getName).containsExactlyInAnyOrder(
@@ -39,7 +39,7 @@ class InterbankTopologyTest {
     }
 
     @Test
-    void everyDeadLetterQueueBelongsToAQueueOfTheSameBank() {
+    void shouldPairEveryDlqWithQueueOfSameBank() {
         for (String queue : InterbankTopology.queues()) {
             if (queue.endsWith(".dlq")) {
                 assertThat(InterbankTopology.queues()).as("the queue %s is the dead letters of", queue)
@@ -49,7 +49,7 @@ class InterbankTopologyTest {
     }
 
     @Test
-    void everyQueueIsBoundToTheExchangeByItsOwnName() {
+    void shouldBindEveryQueueByItsName() {
         List<Binding> bindings = topology.getDeclarablesByType(Binding.class);
 
         assertThat(bindings).hasSize(InterbankTopology.queues().size());

@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 
 class EventJsonTest {
 
-    /** The transfer as bank-core writes it, with the field order and spacing of a hand-written example. */
     private static final String TRANSFER = """
             {"transferId": "0f5bd7c2-3a4e-4c1b-9d0e-6f2a8b1c3d4e",
              "fromIban": "UA843999990000000000000000001", "fromName": "Artem Tkachuk",
@@ -30,19 +29,19 @@ class EventJsonTest {
     private final EventJson json = new EventJson();
 
     @Test
-    void readsATransferAsBankCoreWritesIt() {
+    void shouldReadTransferAsBankCoreWritesIt() {
         assertThat(json.read(TRANSFER, TransferRequested.class)).isEqualTo(TestTransfers.transfer());
     }
 
     @Test
-    void readsBackWhatItWritesWithTheAmountExact() {
+    void shouldKeepAmountExactInRoundTrip() {
         TransferRequested transfer = TestTransfers.transfer();
 
         assertThat(json.read(json.write(transfer), TransferRequested.class)).isEqualTo(transfer);
     }
 
     @Test
-    void writesDatesAsIsoTextAndAmountsAsNumbers() {
+    void shouldWriteDatesAsIsoTextAndAmountsAsNumbers() {
         Map<?, ?> status = json.read(json.write(new TransferStatusChanged(TestTransfers.TRANSFER_ID,
                 TransferStatus.SETTLED, "ANSWER-1", Instant.parse("2026-11-17T08:30:05Z"))), Map.class);
         Map<?, ?> transfer = json.read(json.write(TestTransfers.transfer()), Map.class);
@@ -53,14 +52,14 @@ class EventJsonTest {
     }
 
     @Test
-    void ignoresAFieldItDoesNotKnow() {
+    void shouldIgnoreUnknownField() {
         String withAChannel = TRANSFER.replace("\"currency\"", "\"channel\": \"mobile\", \"currency\"");
 
         assertThat(json.read(withAChannel, TransferRequested.class)).isEqualTo(TestTransfers.transfer());
     }
 
     @Test
-    void refusesAnEventThatBreaksItsRulesAndSaysWhich() {
+    void shouldRejectInvalidEventAndSayWhy() {
         String negative = TRANSFER.replace("150.00", "-150.00");
 
         assertThatThrownBy(() -> json.read(negative, TransferRequested.class))
@@ -69,7 +68,7 @@ class EventJsonTest {
     }
 
     @Test
-    void readsBankCoresDecisionsAsItWritesThem() {
+    void shouldReadBankCoreDecisions() {
         IncomingTransferDecided credited = json.read("""
                 {"uetr": "3b9f7a52-1c4d-4e8f-a0b6-7d2e5c9f1a34", "transferId": "9d1c4b7e-2f3a-4e5b-8c6d-0a1b2c3d4e5f",
                  "decision": "CREDITED", "reason": null, "decidedAt": "2026-11-18T09:15:01Z"}
@@ -87,7 +86,7 @@ class EventJsonTest {
     }
 
     @Test
-    void refusesADecisionItDoesNotKnow() {
+    void shouldRejectUnknownDecision() {
         String returned = """
                 {"uetr": "3b9f7a52-1c4d-4e8f-a0b6-7d2e5c9f1a34", "transferId": "9d1c4b7e-2f3a-4e5b-8c6d-0a1b2c3d4e5f",
                  "decision": "RETURNED", "reason": null, "decidedAt": "2026-11-18T09:15:01Z"}
@@ -95,11 +94,11 @@ class EventJsonTest {
 
         assertThatThrownBy(() -> json.read(returned, IncomingTransferDecided.class))
                 .isInstanceOf(InvalidEventException.class)
-                .hasMessageContaining("Not a valid IncomingTransferDecided");
+                .hasMessageContaining("Invalid IncomingTransferDecided");
     }
 
     @Test
-    void writesAPaymentForBankCoreWithItsFieldsOnly() {
+    void shouldWriteIncomingTransferWithItsFieldsOnly() {
         IncomingTransferReceived transfer = new IncomingTransferReceived(
                 UUID.fromString("3b9f7a52-1c4d-4e8f-a0b6-7d2e5c9f1a34"), "UA643888880000000000000000777",
                 "Olena Kovalenko", "UA843999990000000000000000001", "Artem Demo", new BigDecimal("250.00"), "UAH",
@@ -115,12 +114,12 @@ class EventJsonTest {
     }
 
     @Test
-    void refusesTextThatIsNotJson() {
+    void shouldRejectTextThatIsNotJson() {
         assertThatThrownBy(() -> json.read("150 UAH to Olena, please", TransferRequested.class))
                 .isInstanceOf(InvalidEventException.class)
-                .hasMessageContaining("Not a valid TransferRequested");
+                .hasMessageContaining("Invalid TransferRequested");
         assertThatThrownBy(() -> json.read(" ", TransferRequested.class))
                 .isInstanceOf(InvalidEventException.class)
-                .hasMessageContaining("empty");
+                .hasMessageContaining("Empty");
     }
 }

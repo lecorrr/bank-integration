@@ -14,7 +14,7 @@ class IncomingTransferReceivedTest {
     private static final Instant RECEIVED_AT = Instant.parse("2026-11-18T09:15:02Z");
 
     @Test
-    void tellsBankCoreWhoPaysWhomHowMuchAndWhy() {
+    void shouldCarryPartiesAmountAndDescription() {
         Pacs008 payment = TestPayments.payment();
 
         IncomingTransferReceived transfer = IncomingTransferReceived.of(payment, RECEIVED_AT);
@@ -31,7 +31,7 @@ class IncomingTransferReceivedTest {
     }
 
     @Test
-    void givesTheAmountInKopiykyWhateverDecimalsTheMessageWroteIt() {
+    void shouldNormalizeAmountToTwoDecimals() {
         IncomingTransferReceived whole = IncomingTransferReceived.of(TestPayments.builder().amount("250").build(),
                 RECEIVED_AT);
         IncomingTransferReceived longer = IncomingTransferReceived.of(
@@ -42,7 +42,7 @@ class IncomingTransferReceivedTest {
     }
 
     @Test
-    void needsEveryField() {
+    void shouldRequireEveryField() {
         assertThatThrownBy(() -> new IncomingTransferReceived(UUID.randomUUID(), TestPayments.PARTNER_CUSTOMER,
                 "Olena Kovalenko", TestPayments.OUR_CUSTOMER, "Artem Demo", new BigDecimal("1.00"), "UAH", null,
                 RECEIVED_AT))

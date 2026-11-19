@@ -5,26 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * A payment from another bank to a customer of bank-core, for bank-core to credit or refuse; its answer is an
- * IncomingTransferDecided. Published to {@value #TOPIC}, keyed by toIban, so the payments to one account keep
- * their order. As JSON:
- *
- * <pre>
- * {"uetr": "3b9f7a52-1c4d-4e8f-a0b6-7d2e5c9f1a34",
- *  "fromIban": "UA643888880000000000000000777", "fromName": "Olena Kovalenko",
- *  "toIban": "UA843999990000000000000000001", "toName": "Artem Demo",
- *  "amount": 250.00, "currency": "UAH", "description": "For the concert tickets",
- *  "receivedAt": "2026-11-18T09:15:00Z"}
- * </pre>
- *
- * The same payment can come more than once, after a crash or when the other bank sends it again; bank-core credits
- * it once, by its UETR, and answers a copy with the decision it made the first time.
- *
- * @param uetr        the payment's unique end-to-end reference, which the other bank gave it
- * @param description what the payer wrote for the payee
- * @param receivedAt  when our bank received the pacs.008
- */
+/** Our event passing a payment from another bank to bank-core (topic interbank.incoming-transfers). */
 public record IncomingTransferReceived(
         UUID uetr,
         String fromIban,
@@ -45,7 +26,6 @@ public record IncomingTransferReceived(
         }
     }
 
-    /** The payment as bank-core sees it; IncomingChecks has passed it, so the amount has two decimals at most. */
     static IncomingTransferReceived of(Pacs008 payment, Instant receivedAt) {
         return new IncomingTransferReceived(
                 UUID.fromString(payment.uetr()),

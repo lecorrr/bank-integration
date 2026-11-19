@@ -22,7 +22,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.testcontainers.kafka.KafkaContainer;
 
-/** Kafka as bank-core uses it in the integration tests: it publishes events, and reads them from a topic's start. */
+/** Publishes and reads Kafka records the way bank-core does. */
 public final class TestKafka {
 
     private final KafkaContainer kafka;
@@ -33,7 +33,6 @@ public final class TestKafka {
         this.timeout = timeout;
     }
 
-    /** Publishes one event as JSON text, and waits until Kafka has it. */
     public void publish(String topic, String key, String json) throws Exception {
         Map<String, Object> config = Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
         try (KafkaProducer<String, String> producer =
@@ -42,7 +41,6 @@ public final class TestKafka {
         }
     }
 
-    /** The first records that match, as many as asked for; fails when fewer come within the timeout. */
     public List<ConsumerRecord<String, String>> records(String topic, Predicate<ConsumerRecord<String, String>> wanted,
             int count) {
         List<ConsumerRecord<String, String>> found = recordsWithin(topic, wanted, count, timeout);
@@ -50,11 +48,11 @@ public final class TestKafka {
         return found;
     }
 
-    /** Up to count records that match, read from the start of the topic in a consumer group of its own. */
     public List<ConsumerRecord<String, String>> recordsWithin(String topic,
             Predicate<ConsumerRecord<String, String>> wanted, int count, Duration wait) {
         Map<String, Object> config = Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
+                // A new group every time, so each call reads the topic from the start.
                 ConsumerConfig.GROUP_ID_CONFIG, "test-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         List<ConsumerRecord<String, String>> found = new ArrayList<>();

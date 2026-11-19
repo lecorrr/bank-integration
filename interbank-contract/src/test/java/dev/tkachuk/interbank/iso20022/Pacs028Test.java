@@ -12,7 +12,7 @@ class Pacs028Test {
     private static final String REQUEST = "/Document/FIToFIPmtStsReq";
 
     @Test
-    void asksAboutAPaymentByItsIdsFromTheBankThatSentIt() {
+    void shouldAskAboutPaymentByItsIds() {
         Pacs008 payment = TestMessages.pacs008();
 
         Pacs028 request = Pacs028.about(payment, "STATUS-REQUEST-1", TestMessages.CREATED_AT.plusSeconds(60));
@@ -27,14 +27,14 @@ class Pacs028Test {
     }
 
     @Test
-    void readsBackEveryFieldItWrites() {
+    void shouldReadBackEveryFieldItWrites() {
         Pacs028 request = TestMessages.pacs028();
 
         assertThat(Pacs028.parse(request.toXml())).isEqualTo(request);
     }
 
     @Test
-    void writesADocumentTheOfficialSchemaAccepts() throws Exception {
+    void shouldWriteDocumentThatPassesSchema() throws Exception {
         String xml = TestMessages.pacs028().toXml();
 
         TestXml.validate(xml, Pacs028.MESSAGE_NAME);
@@ -53,7 +53,7 @@ class Pacs028Test {
             "OrgnlEndToEndId, /TxInf/OrgnlEndToEndId",
             "OrgnlTxId, /TxInf/OrgnlTxId",
             "OrgnlUETR, /TxInf/OrgnlUETR"})
-    void refusesARequestWithoutAnElementOurSchemeRequires(String element, String path) {
+    void shouldRejectRequestMissingRequiredElement(String element, String path) {
         String xml = without(TestMessages.pacs028().toXml(), element);
 
         assertThatThrownBy(() -> Pacs028.parse(xml))
@@ -62,7 +62,7 @@ class Pacs028Test {
     }
 
     @Test
-    void refusesARequestAboutAnotherMessageType() {
+    void shouldRejectRequestAboutOtherMessageType() {
         String xml = TestMessages.pacs028().toXml().replace("<OrgnlMsgNmId>pacs.008.001.08</OrgnlMsgNmId>",
                 "<OrgnlMsgNmId>pacs.009.001.08</OrgnlMsgNmId>");
 
@@ -72,7 +72,7 @@ class Pacs028Test {
     }
 
     @Test
-    void refusesARequestAboutMoreThanOnePayment() {
+    void shouldRejectRequestAboutMoreThanOnePayment() {
         String xml = TestMessages.pacs028().toXml();
         String end = "</TxInf>";
         String transaction = xml.substring(xml.indexOf("<TxInf>"), xml.indexOf(end) + end.length());
@@ -83,7 +83,7 @@ class Pacs028Test {
     }
 
     @Test
-    void refusesAStatusReport() {
+    void shouldRejectStatusReport() {
         String pacs002 = Pacs002.notReceived(TestMessages.pacs028(), "ANSWER-1", TestMessages.CREATED_AT).toXml();
 
         assertThatThrownBy(() -> Pacs028.parse(pacs002))
@@ -92,7 +92,7 @@ class Pacs028Test {
     }
 
     @Test
-    void refusesARequestWithAnInvalidBic() {
+    void shouldRejectInvalidBic() {
         Pacs008 payment = TestMessages.pacs008();
 
         assertThatThrownBy(() -> new Pacs028("STATUS-REQUEST-1", TestMessages.CREATED_AT, "bnkcuaukxxx",
@@ -102,7 +102,6 @@ class Pacs028Test {
                 .hasMessageContaining("instructingAgentBic");
     }
 
-    /** The XML without the first element of that name, and whatever it contains. */
     private static String without(String xml, String element) {
         return xml.replaceFirst("(?s)\\s*<" + element + ">.*?</" + element + ">", "");
     }

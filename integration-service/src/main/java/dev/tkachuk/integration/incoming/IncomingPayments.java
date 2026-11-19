@@ -1,5 +1,7 @@
 package dev.tkachuk.integration.incoming;
 
+import dev.tkachuk.integration.screening.Screening;
+import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -11,11 +13,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
-/**
- * The payments from other banks to bank-core's customers, in table incoming_payment. A payment is stored once, by
- * its UETR, and answered once: the answer is a conditional UPDATE that only a payment without one takes, so an
- * answer given stands.
- */
+/** Table incoming_payment: one row per UETR, answered once. */
 @Component
 class IncomingPayments {
 
@@ -25,12 +23,6 @@ class IncomingPayments {
         this.jdbc = jdbc;
     }
 
-    /**
-     * Stores the payment, unless one with its UETR, or with its MsgId from the same bank, is stored already.
-     *
-     * @return the payment stored under its UETR, whichever message stored it first; none when its sending bank's
-     *         MsgId is taken by another payment
-     */
     Optional<IncomingPayment> insertIfAbsent(IncomingPayment payment) {
         jdbc.sql("""
                         INSERT INTO incoming_payment (uetr, sender_bic, message_id, pacs008, received_at, status,
@@ -58,7 +50,6 @@ class IncomingPayments {
                 .optional();
     }
 
-    /** The payment the bank with this BIC sent under this MsgId. */
     Optional<IncomingPayment> findByMessageId(String senderBic, String messageId) {
         return jdbc.sql("SELECT * FROM incoming_payment WHERE sender_bic = :senderBic AND message_id = :messageId")
                 .param("senderBic", senderBic)
@@ -67,12 +58,41 @@ class IncomingPayments {
                 .optional();
     }
 
-    /**
-     * Our answer, from bank-core's decision on its transfer bankTransferId; a payment answered already keeps its
-     * answer.
-     *
-     * @return false when the payment had an answer already
-     */
+    IncomingPayment recordCleared(UUID uetr, Screening screening) {
+        if (!screening.cleared()) {
+            throw new IllegalArgumentException("Screening " + screening.screeningId() + " did not clear the payment");
+        }
+        jdbc.sql("""
+                        UPDATE incoming_payment
+                        SET screening_outcome = 'CLEAR', screening_id = :screeningId, screened_at = :screenedAt
+                        WHERE uetr = :uetr AND screening_outcome IS NULL AND status IS NULL""")
+                .param("uetr", uetr)
+                .param("screeningId", screening.screeningId())
+                .param("screenedAt", utc(screening.screenedAt()))
+                .update();
+        return storedAfterScreening(uetr);
+    }
+
+    IncomingPayment recordSanctionsRefusal(UUID uetr, Screening screening, String reportId, Instant answeredAt) {
+        if (screening.cleared()) {
+            throw new IllegalArgumentException("Screening " + screening.screeningId() + " cleared the payment");
+        }
+        jdbc.sql("""
+                        UPDATE incoming_payment
+                        SET screening_outcome = 'HIT', screening_id = :screeningId, screened_at = :screenedAt,
+                            status = 'RJCT', reason_code = :reasonCode, report_id = :reportId,
+                            answered_at = :answeredAt
+                        WHERE uetr = :uetr AND screening_outcome IS NULL AND status IS NULL""")
+                .param("uetr", uetr)
+                .param("screeningId", screening.screeningId())
+                .param("screenedAt", utc(screening.screenedAt()))
+                .param("reasonCode", StatusReason.REGULATORY_REASON)
+                .param("reportId", reportId)
+                .param("answeredAt", utc(answeredAt))
+                .update();
+        return storedAfterScreening(uetr);
+    }
+
     boolean recordAnswer(UUID uetr, TransactionStatus status, String reasonCode, String reportId, Instant answeredAt,
             UUID bankTransferId) {
         int updated = jdbc.sql("""
@@ -90,6 +110,11 @@ class IncomingPayments {
         return updated == 1;
     }
 
+    private IncomingPayment storedAfterScreening(UUID uetr) {
+        return find(uetr).orElseThrow(() -> new IllegalStateException(
+                "Payment " + uetr + " was screened, but it is not stored"));
+    }
+
     private static IncomingPayment fromRow(ResultSet row, int rowNumber) throws SQLException {
         String status = row.getString("status");
         return new IncomingPayment(
@@ -102,7 +127,9 @@ class IncomingPayments {
                 row.getString("reason_code"),
                 row.getString("report_id"),
                 instantOf(row, "answered_at"),
-                row.getObject("bank_transfer_id", UUID.class));
+                row.getObject("bank_transfer_id", UUID.class),
+                Screening.stored(row.getString("screening_outcome"), row.getString("screening_id"),
+                        instantOf(row, "screened_at")));
     }
 
     private static Instant instantOf(ResultSet row, String column) throws SQLException {
@@ -110,7 +137,6 @@ class IncomingPayments {
         return value == null ? null : value.toInstant();
     }
 
-    /** The PostgreSQL driver binds an OffsetDateTime to timestamptz; it has no binding for Instant. */
     private static OffsetDateTime utc(Instant instant) {
         return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
     }

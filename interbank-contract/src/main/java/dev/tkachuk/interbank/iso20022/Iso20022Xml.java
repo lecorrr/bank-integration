@@ -31,21 +31,9 @@ import org.xml.sax.SAXParseException;
 import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.XMLFilterImpl;
 
-/**
- * Writes and reads one ISO 20022 message type with the JAXB classes generated from its official XSD, which is
- * bundled as /xsd/{message name}.xsd. Every document is checked against that XSD both ways: we never send what
- * the other bank's own check would refuse, and never act on a message the standard does not allow.
- *
- * <p>Incoming XML is untrusted. The parser refuses any DOCTYPE, which rules out external entities (XXE:
- * reading local files, calling internal URLs) and entity expansion, and the check uses the bundled XSD only,
- * never one that a document points to. Errors give the element's path and the rule it broke but never its
- * value, because names and IBANs are personal data and end up in logs.
- *
- * @param <D> the generated Document class of the message
- */
+/** Reads and writes one ISO 20022 message type with JAXB and validates it against the official XSD both ways. */
 final class Iso20022Xml<D> {
 
-    /** The schema validator starts each error with the rule's name, e.g. "cvc-pattern-valid: Value '...'". */
     private static final Pattern RULE = Pattern.compile("cvc-[\\w.-]+(?=:)");
 
     private final String messageName;
@@ -55,12 +43,6 @@ final class Iso20022Xml<D> {
     private final JAXBContext context;
     private final Schema schema;
 
-    /**
-     * @param messageName   e.g. "pacs.008.001.08"; it also names the XSD
-     * @param asRootElement wraps a Document in the Document element (the generated ObjectFactory's
-     *                      createDocument): the XSD makes Document a named type, so the class has no
-     *                      {@code @XmlRootElement} of its own
-     */
     Iso20022Xml(String messageName, String namespace, Class<D> documentType,
             Function<D, JAXBElement<D>> asRootElement) {
         this.messageName = messageName;
@@ -71,7 +53,6 @@ final class Iso20022Xml<D> {
         this.schema = loadSchema("/xsd/" + messageName + ".xsd");
     }
 
-    /** @throws InvalidMessageException when the document breaks the schema, e.g. an amount with six decimals */
     String write(D document) {
         StringWriter writer = new StringWriter();
         try {
@@ -86,10 +67,6 @@ final class Iso20022Xml<D> {
         return xml;
     }
 
-    /**
-     * @throws InvalidMessageException when the XML is empty, not well-formed, another message type, or breaks
-     *                                 the schema
-     */
     D read(String xml) {
         check(xml);
         try {
@@ -100,7 +77,6 @@ final class Iso20022Xml<D> {
         }
     }
 
-    /** An element the schema leaves optional and our scheme requires, such as the UETR. */
     <T> T required(T value, String path) {
         if (value == null) {
             throw new InvalidMessageException("The " + messageName + " message has no " + path);
@@ -108,7 +84,6 @@ final class Iso20022Xml<D> {
         return value;
     }
 
-    /** An element the schema lets repeat and our scheme allows exactly once. */
     <T> T single(List<T> values, String path) {
         if (values.size() != 1) {
             throw new InvalidMessageException(
@@ -126,7 +101,6 @@ final class Iso20022Xml<D> {
         try {
             validator.validate(new SAXSource(path, new InputSource(new StringReader(xml))));
         } catch (SAXException | IOException e) {
-            // ElementPath and Refusal throw InvalidMessageException for everything they see; this is the rest.
             throw new InvalidMessageException("The " + messageName + " message cannot be read", e);
         }
     }
@@ -151,10 +125,6 @@ final class Iso20022Xml<D> {
         }
     }
 
-    /**
-     * Opened through the class loader's URL, from a directory or a jar alike; the factory only reads the bytes
-     * and uses the URL to name the file in its errors.
-     */
     private static Schema loadSchema(String resource) {
         URL url = Iso20022Xml.class.getResource(resource);
         if (url == null) {
@@ -162,6 +132,7 @@ final class Iso20022Xml<D> {
         }
         try (InputStream xsd = url.openStream()) {
             SchemaFactory factory = SchemaFactory.newDefaultInstance();
+            // Only the bundled XSD, never one a document points to.
             factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
             factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             return factory.newSchema(new StreamSource(xsd, url.toExternalForm()));
@@ -173,6 +144,7 @@ final class Iso20022Xml<D> {
     private static XMLReader newSecureParser() {
         try {
             SAXParserFactory factory = SAXParserFactory.newDefaultNSInstance();
+            // No DOCTYPE at all: rules out XXE and entity expansion.
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
             factory.setXIncludeAware(false);
@@ -182,10 +154,7 @@ final class Iso20022Xml<D> {
         }
     }
 
-    /**
-     * Tracks the element being read, so an error can say where it is without quoting what is there, and
-     * refuses a document of another message type at its root element.
-     */
+    /** Tracks where the parser is, for error messages. */
     private final class ElementPath extends XMLFilterImpl {
 
         private final Deque<String> elements = new ArrayDeque<>();
@@ -211,13 +180,11 @@ final class Iso20022Xml<D> {
             elements.removeLast();
         }
 
-        /** e.g. "/Document/FIToFICstmrCdtTrf/GrpHdr/MsgId" */
         String current() {
             return "/" + String.join("/", elements);
         }
     }
 
-    /** Refuses the message at the first error. */
     private final class Refusal implements ErrorHandler {
 
         private final ElementPath path;
@@ -228,19 +195,17 @@ final class Iso20022Xml<D> {
 
         @Override
         public void warning(SAXParseException exception) {
-            // A warning never makes a message invalid.
         }
 
-        /** A broken schema rule. The validator's text quotes the value, so neither it nor the exception goes along. */
         @Override
         public void error(SAXParseException exception) {
+            // The validator's message quotes the value (often a name or IBAN), so only the path and rule are reported.
             Matcher rule = RULE.matcher(String.valueOf(exception.getMessage()));
             String ruleName = rule.find() ? rule.group() : "schema rule";
             throw new InvalidMessageException("The " + messageName + " message breaks its schema at " + path.current()
                     + " (" + ruleName + ", line " + exception.getLineNumber() + ")");
         }
 
-        /** Not well-formed XML, or a DOCTYPE. The parser's text names the problem, not the content. */
         @Override
         public void fatalError(SAXParseException exception) {
             throw new InvalidMessageException(

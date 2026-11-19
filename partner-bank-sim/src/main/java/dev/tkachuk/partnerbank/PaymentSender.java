@@ -19,16 +19,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-/**
- * Sends the partner bank's payments to bank-core's customers (pacs.008) and its status requests about them
- * (pacs.028), to bank-core's bank over RabbitMQ. Each message travels under its own MsgId as the AMQP message id.
- */
+/** Sends payments from this bank's test customer to bank-core's bank, and status requests about them. */
 @Component
 class PaymentSender {
 
-    /** ISO 20022's word for an end-to-end id the payer did not give. */
     static final String NOT_PROVIDED = "NOTPROVIDED";
-    /** The business day follows Kyiv time. */
     private static final ZoneId BANK_ZONE = ZoneId.of("Europe/Kyiv");
 
     private static final Logger log = LoggerFactory.getLogger(PaymentSender.class);
@@ -45,12 +40,6 @@ class PaymentSender {
         this.clock = clock;
     }
 
-    /**
-     * A new payment from this bank's customer, under a new UETR and MsgId.
-     *
-     * @throws IllegalArgumentException when the payment is not one a pacs.008 can carry, such as a name of 141
-     *                                  characters; the message says which field
-     */
     Pacs008 send(String toIban, String toName, BigDecimal amount, String currency, String description) {
         Instant now = clock.instant().truncatedTo(ChronoUnit.SECONDS);
         String messageId = newMessageId();
@@ -59,25 +48,23 @@ class PaymentSender {
                 sending.bic(), toName, toIban, sending.payeeBankBic(), description);
         String xml = payment.toXml();
         sent.remember(payment);
-        log.info("Sending pacs.008 {} (payment {}, {} {}) to bank-core's bank", payment.messageId(), payment.uetr(),
+        log.info("Sending pacs.008 {} (payment {}, {} {})", payment.messageId(), payment.uetr(),
                 payment.amount().toPlainString(), payment.currency());
         toBank(BANK_PACS008, payment.messageId(), xml);
         sent.countSent(payment.uetr());
         return payment;
     }
 
-    /** The same pacs.008 again, MsgId and all, so a bank that has it already drops the copy. */
     void sendAgain(Pacs008 payment) {
-        log.info("Sending pacs.008 {} (payment {}) again", payment.messageId(), payment.uetr());
+        log.info("Resending pacs.008 {} (payment {})", payment.messageId(), payment.uetr());
         toBank(BANK_PACS008, payment.messageId(), payment.toXml());
         sent.countSent(payment.uetr());
     }
 
-    /** Asks what became of the payment; the answer comes back like any other. */
     Pacs028 ask(Pacs008 payment) {
         Pacs028 request = Pacs028.about(payment, newMessageId(), clock.instant().truncatedTo(ChronoUnit.SECONDS));
-        log.info("Asking about pacs.008 {} (payment {}) with pacs.028 {}", payment.messageId(), payment.uetr(),
-                request.messageId());
+        log.info("Sending pacs.028 {} for pacs.008 {} (payment {})", request.messageId(), payment.messageId(),
+                payment.uetr());
         toBank(BANK_PACS028, request.messageId(), request.toXml());
         return request;
     }

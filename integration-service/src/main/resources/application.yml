@@ -2,59 +2,59 @@ spring:
   application:
     name: integration-service
   datasource:
-    # The compose PostgreSQL on localhost:5435; in Docker, compose sets DB_URL. Flyway creates the table.
     url: ${DB_URL:jdbc:postgresql://localhost:5435/integration}
     username: ${DB_USER:integration}
     password: ${DB_PASSWORD:integration}
     hikari:
-      # Milliseconds. Without a database a step fails after 5 seconds, not 30, and the route tries it again.
-      connection-timeout: 5000
+      connection-timeout: 5000   # ms; without a database a step fails fast and the route retries it
       data-source-properties:
-        # Seconds. A query the database never answers fails after 30 of them; the driver would wait forever.
-        socketTimeout: 30
+        socketTimeout: 30   # seconds; the driver's default is to wait forever
   rabbitmq:
-    # The compose RabbitMQ on localhost; in Docker, compose sets RABBITMQ_HOST=rabbitmq.
     host: ${RABBITMQ_HOST:localhost}
     port: 5672
     username: ${RABBITMQ_USER:interbank}
     password: ${RABBITMQ_PASSWORD:interbank}
-    # Every send waits for RabbitMQ to confirm it holds the message (confirm=enabled in Routes.toQueue).
-    publisher-confirm-type: simple
-    # A broker that does not answer fails the attempt after 5 seconds rather than the client's default 60.
+    publisher-confirm-type: simple   # needed by confirm=enabled in Routes.toQueue
     connection-timeout: 5s
 
 server:
-  # 8080 is bank-core, 8083 the partner bank simulator.
   port: 8082
 
 camel:
   component:
     spring-rabbitmq:
-      # The exchange, queues and bindings come from InterbankTopology, declared once by Spring's RabbitAdmin.
-      # A queue Camel declared on its own would lack the quorum argument, and the broker would refuse one of the two.
+      # Queues are declared by InterbankTopology (quorum queues). A queue Camel declared itself would
+      # lack the quorum argument and the broker would refuse it.
       auto-declare: false
     kafka:
-      # The compose Kafka on localhost; in Docker, compose sets KAFKA_BOOTSTRAP_SERVERS=kafka:19092.
       brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
-# Our bank, and the banks we can pay through SEP, by the six-digit code in their IBANs (InterbankProperties).
+# Our bank and the SEP participants we can pay, by the bank code in their IBANs.
 interbank:
   bank-code: "399999"
   bic: BNKCUAUKXXX
   participants:
     "388888": PRTBUAUKXXX
 
-# When the other bank's answer is late, integration-service asks for it with a pacs.028 (StatusRequestPolicy).
-# It never stops asking and never refuses a payment for want of an answer.
+# pacs.028 status requests for payments without a final answer. They never stop.
 status-requests:
-  # The first request, this long after the pacs.008 went out.
   first-after: 30s
-  # The wait doubles after every request (1, 2, 4, 8 minutes), up to this.
-  max-interval: 10m
-  # From the fifth unanswered request on, about 15 minutes in, each one is logged as an error for a person.
-  alarm-after: 5
-  # How often the service looks for payments due a request.
+  max-interval: 10m   # the wait doubles after each request up to this
+  alarm-after: 5   # from the 5th request on, each one is logged as an error
   poll-interval: 5s
+
+sanctions-screening:
+  url: ${SANCTIONS_SCREENING_URL:http://localhost:8084/ws/screening}
+  connect-timeout: 2s
+  read-timeout: 5s
+  # Opens when half of the last 10 calls failed (counted from the 5th call), stays open 30 s,
+  # then 2 trial calls decide whether it closes.
+  circuit-breaker:
+    failure-rate-threshold: 50
+    sliding-window-size: 10
+    minimum-number-of-calls: 5
+    wait-in-open-state: 30s
+    permitted-calls-in-half-open-state: 2
 
 management:
   endpoints:

@@ -16,14 +16,14 @@ class Pacs008Test {
     private static final String TRANSACTION = "/Document/FIToFICstmrCdtTrf/CdtTrfTxInf";
 
     @Test
-    void readsBackEveryFieldItWrites() {
+    void shouldReadBackEveryFieldItWrites() {
         Pacs008 payment = TestMessages.pacs008();
 
         assertThat(Pacs008.parse(payment.toXml())).isEqualTo(payment);
     }
 
     @Test
-    void writesADocumentTheOfficialSchemaAccepts() throws Exception {
+    void shouldWriteDocumentThatPassesSchema() throws Exception {
         String xml = TestMessages.pacs008().toXml();
 
         TestXml.validate(xml, Pacs008.MESSAGE_NAME);
@@ -33,7 +33,7 @@ class Pacs008Test {
     }
 
     @Test
-    void keepsMarkupCharactersInAValueAsText() throws Exception {
+    void shouldEscapeMarkupCharacters() throws Exception {
         String name = "Tom & Jerry <Ltd> \"T&J\" 'UA'";
         Pacs008 payment = TestMessages.pacs008(name);
 
@@ -44,7 +44,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesAnotherMessageType() {
+    void shouldRejectOtherMessageType() {
         String pacs002 = Pacs002.answering(TestMessages.pacs008(), TransactionStatus.ACSC, "ANSWER-1",
                 TestMessages.CREATED_AT).toXml();
 
@@ -53,7 +53,6 @@ class Pacs008Test {
                 .hasMessageContaining(Pacs008.NAMESPACE);
     }
 
-    /** What a sending bank got wrong, and where the refusal says it is. */
     static Stream<Arguments> schemaViolations() {
         return Stream.of(
                 Arguments.of("a lower-case currency code",
@@ -69,7 +68,7 @@ class Pacs008Test {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("schemaViolations")
-    void refusesAMessageThatBreaksTheSchema(String violation, UnaryOperator<String> breakIt, String where) {
+    void shouldRejectMessageThatFailsSchema(String violation, UnaryOperator<String> breakIt, String where) {
         String xml = breakIt.apply(TestMessages.pacs008().toXml());
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
@@ -78,7 +77,7 @@ class Pacs008Test {
     }
 
     @Test
-    void neverQuotesTheValueThatBrokeTheSchema() {
+    void shouldNotQuoteInvalidValue() {
         String iban = TestMessages.pacs008().debtorIban();
         String xml = TestMessages.pacs008().toXml().replace(iban, iban.substring(0, 4) + " " + iban.substring(4));
 
@@ -90,7 +89,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesAMessageWithoutAFieldWeRequire() {
+    void shouldRejectMessageMissingRequiredField() {
         String xml = TestMessages.pacs008().toXml().replaceFirst("\\s*<UETR>[^<]*</UETR>", "");
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
@@ -99,7 +98,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesMoreThanOneTransaction() {
+    void shouldRejectMoreThanOneTransaction() {
         String xml = TestMessages.pacs008().toXml().replace("<NbOfTxs>1</NbOfTxs>", "<NbOfTxs>2</NbOfTxs>");
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
@@ -108,7 +107,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesMoreThanOneLineOfRemittanceInformation() {
+    void shouldRejectMoreThanOneRemittanceLine() {
         String xml = TestMessages.pacs008().toXml().replace("</Ustrd>", "</Ustrd><Ustrd>Thank you</Ustrd>");
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
@@ -117,7 +116,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesABlankIdThatTheSchemaAllows() {
+    void shouldRejectBlankId() {
         String xml = TestMessages.pacs008().toXml().replaceFirst("<TxId>[^<]*</TxId>", "<TxId>   </TxId>");
 
         assertThatThrownBy(() -> Pacs008.parse(xml))
@@ -126,7 +125,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesToWriteAnAmountTheSchemaDoesNotAllow() {
+    void shouldNotWriteAmountSchemaDoesNotAllow() {
         Pacs008 valid = TestMessages.pacs008();
         Pacs008 sixDecimals = new Pacs008(valid.messageId(), valid.createdAt(), valid.endToEndId(),
                 valid.transactionId(), valid.uetr(), new BigDecimal("150.000001"), valid.currency(),
@@ -139,7 +138,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesADoctypeSoNoExternalEntityIsEverRead() {
+    void shouldRejectDoctype() {
         String xxe = """
                 <?xml version="1.0"?>
                 <!DOCTYPE Document [<!ENTITY secret SYSTEM "file:///etc/passwd">]>
@@ -152,7 +151,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesTextThatIsNotXml() {
+    void shouldRejectTextThatIsNotXml() {
         assertThatThrownBy(() -> Pacs008.parse("150 UAH to Olena, please"))
                 .isInstanceOf(InvalidMessageException.class);
         assertThatThrownBy(() -> Pacs008.parse("  "))
@@ -161,7 +160,7 @@ class Pacs008Test {
     }
 
     @Test
-    void refusesToBuildAPaymentWithoutAPositiveAmount() {
+    void shouldRequirePositiveAmount() {
         Pacs008 valid = TestMessages.pacs008();
 
         assertThatThrownBy(() -> new Pacs008(valid.messageId(), valid.createdAt(), valid.endToEndId(),

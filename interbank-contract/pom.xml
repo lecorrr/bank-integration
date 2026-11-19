@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.tkachuk</groupId>
         <artifactId>bank-integration</artifactId>
-        <version>0.6.1</version>
+        <version>0.7.3</version>
     </parent>
 
     <artifactId>interbank-contract</artifactId>
@@ -15,12 +15,11 @@
     <description>What the two banks agree on: the RabbitMQ topology and the ISO 20022 messages</description>
 
     <dependencies>
-        <!-- Only the topology types (Queue, Exchange, Binding); no connection, no Spring context. -->
+        <!-- Only the topology types (Queue, Exchange, Binding). -->
         <dependency>
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-amqp</artifactId>
         </dependency>
-        <!-- JAXB: the API that the generated message classes use, and its implementation at run time. -->
         <dependency>
             <groupId>jakarta.xml.bind</groupId>
             <artifactId>jakarta.xml.bind-api</artifactId>
@@ -40,17 +39,14 @@
 
     <build>
         <plugins>
-            <!-- Generates the message classes from the official ISO 20022 schemas in src/main/resources/xsd, into
-                 target/generated-sources. One package per message, because the schemas define types with the
-                 same names (GroupHeader91, Document and so on). -->
+            <!-- One package per message: the schemas reuse type names such as Document and GroupHeader91. -->
             <plugin>
                 <groupId>org.jvnet.jaxb</groupId>
                 <artifactId>jaxb-maven-plugin</artifactId>
                 <version>${jaxb-maven-plugin.version}</version>
                 <configuration>
                     <schemaDirectory>src/main/resources/xsd</schemaDirectory>
-                    <!-- No episode file: nothing compiles other schemas against these, and every execution
-                         would write the same META-INF/sun-jaxb.episode into the jar. -->
+                    <!-- No episode file: nothing compiles against these schemas. -->
                     <episode>false</episode>
                 </configuration>
                 <executions>

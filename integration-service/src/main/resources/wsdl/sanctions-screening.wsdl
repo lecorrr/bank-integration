@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sanctions screening service, version 1: SOAP 1.1, document/literal. A soap:Client fault means the
+  request is refused and retrying won't help; any other failure is temporary.
+-->
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+                  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+                  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                  xmlns:tns="urn:bank-integration:sanctions-screening:1"
+                  targetNamespace="urn:bank-integration:sanctions-screening:1"
+                  name="SanctionsScreening">
+
+    <wsdl:types>
+        <xs:schema>
+            <xs:import namespace="urn:bank-integration:sanctions-screening:1"
+                       schemaLocation="../xsd/sanctions-screening.xsd"/>
+        </xs:schema>
+    </wsdl:types>
+
+    <wsdl:message name="ScreenPaymentRequest">
+        <wsdl:part name="body" element="tns:ScreenPaymentRequest"/>
+    </wsdl:message>
+    <wsdl:message name="ScreenPaymentResponse">
+        <wsdl:part name="body" element="tns:ScreenPaymentResponse"/>
+    </wsdl:message>
+
+    <wsdl:portType name="SanctionsScreeningPort">
+        <wsdl:operation name="ScreenPayment">
+            <wsdl:input message="tns:ScreenPaymentRequest"/>
+            <wsdl:output message="tns:ScreenPaymentResponse"/>
+        </wsdl:operation>
+    </wsdl:portType>
+
+    <wsdl:binding name="SanctionsScreeningSoap11" type="tns:SanctionsScreeningPort">
+        <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+        <wsdl:operation name="ScreenPayment">
+            <soap:operation soapAction="urn:bank-integration:sanctions-screening:1:ScreenPayment"/>
+            <wsdl:input>
+                <soap:body use="literal"/>
+            </wsdl:input>
+            <wsdl:output>
+                <soap:body use="literal"/>
+            </wsdl:output>
+        </wsdl:operation>
+    </wsdl:binding>
+
+    <wsdl:service name="SanctionsScreeningService">
+        <wsdl:port name="SanctionsScreeningSoap11" binding="tns:SanctionsScreeningSoap11">
+            <!-- The compose stub; integration-service uses sanctions-screening.url. -->
+            <soap:address location="http://localhost:8084/ws/screening"/>
+        </wsdl:port>
+    </wsdl:service>
+</wsdl:definitions>

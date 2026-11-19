@@ -1,8 +1,10 @@
 package dev.tkachuk.integration.outgoing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.tkachuk.integration.TestDatabase;
+import dev.tkachuk.integration.screening.Screening;
 import dev.tkachuk.interbank.iso20022.Pacs002;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
@@ -14,12 +16,9 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-/**
- * The SQL of OutgoingPayments against a real PostgreSQL (TestDatabase). No Spring context: the repository and its
- * table are all that is under test.
- */
 class OutgoingPaymentsIT {
 
     private static final Instant NOW = Instant.parse("2026-11-17T08:30:00Z");
@@ -34,7 +33,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void storesAPaymentOnceAndAfterThatReturnsTheOneStored() {
+    void shouldStorePaymentOnceAndReturnStoredOne() {
         UUID transferId = UUID.randomUUID();
 
         OutgoingPayment first = payments.insertIfAbsent(transferId, idOf(transferId), "<first/>", NOW);
@@ -47,7 +46,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void aSendStartsTheStatusRequestsOver() {
+    void shouldResetStatusRequestsWhenResent() {
         UUID transferId = sent(NOW);
         claimAndAsk(transferId);
 
@@ -62,7 +61,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void aFinalAnswerIsRecordedOnceAndStands() {
+    void shouldRecordFinalAnswerOnce() {
         UUID transferId = sent(NOW);
 
         boolean settled = payments.recordFinal(transferId, PaymentState.SETTLED, report(TransactionStatus.ACSC, null),
@@ -83,7 +82,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void keepsOurOwnRefusalAsAFinalRejectionWithoutAPacs008() {
+    void shouldStoreOwnRefusalAsRejected() {
         UUID transferId = UUID.randomUUID();
 
         payments.recordRefusal(transferId, idOf(transferId), "REFUSAL-1", NOW);
@@ -98,7 +97,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void keepsTheReasonOfARefusal() {
+    void shouldKeepRejectionReason() {
         UUID transferId = sent(NOW);
 
         payments.recordFinal(transferId, PaymentState.REJECTED,
@@ -108,7 +107,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void claimsTheOpenPaymentsWhoseCheckIsDueAndHoldsThemBackUntilTheLeaseEnds() {
+    void shouldClaimDuePaymentsUntilLeaseEnds() {
         UUID due = sent(NOW.minusSeconds(60));
         UUID duePending = sent(NOW.minusSeconds(45));
         payments.recordPending(duePending);
@@ -128,7 +127,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void claimsNoMoreThanTheLimitTheLongestDueFirst() {
+    void shouldClaimOldestDueFirstUpToLimit() {
         UUID oldest = sent(NOW.minusSeconds(90));
         UUID middle = sent(NOW.minusSeconds(60));
         sent(NOW.minusSeconds(30));
@@ -139,13 +138,12 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void aClaimSkipsThePaymentsAnotherInstanceIsClaimingInsteadOfWaitingForThem() throws Exception {
+    void shouldSkipPaymentsLockedByAnotherInstance() throws Exception {
         for (int i = 1; i <= 4; i++) {
             sent(NOW.minusSeconds(60 + i));
         }
         try (Connection otherInstance = TestDatabase.connect()) {
             otherInstance.setAutoCommit(false);
-            // Its claim is still running: the two payments due longest stay locked until it commits.
             try (PreparedStatement claim = otherInstance.prepareStatement(
                     "SELECT transfer_id FROM outgoing_payment ORDER BY next_check_at LIMIT 2 FOR UPDATE")) {
                 claim.executeQuery().close();
@@ -159,7 +157,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void countsAStatusRequestUnlessThePaymentWentOutAgainMeanwhile() {
+    void shouldCountStatusRequestUnlessPaymentWasResent() {
         UUID transferId = sent(NOW);
         OutgoingPayment claimed = payments.claimDue(LATER, LATER.plusSeconds(60), 10).getFirst();
 
@@ -174,7 +172,7 @@ class OutgoingPaymentsIT {
     }
 
     @Test
-    void asksAboutAPaymentAheadOfItsScheduleWhenTold() {
+    void shouldMakePaymentDueNowWhenAsked() {
         UUID transferId = sent(NOW);
         payments.recordSent(transferId, NOW, NOW.plus(Duration.ofHours(1)));
         assertThat(payments.claimDue(LATER, LATER, 10)).as("claimed before it was told").isEmpty();
@@ -185,7 +183,66 @@ class OutgoingPaymentsIT {
                 .containsExactly(transferId);
     }
 
-    /** A payment whose pacs.008 went out at sentAt, due its first status request then. */
+    @Test
+    void shouldStoreScreeningOnceAndKeepFirst() {
+        UUID transferId = stored();
+
+        OutgoingPayment cleared = payments.recordScreening(transferId, screening(Screening.Outcome.CLEAR, NOW));
+        OutgoingPayment again = payments.recordScreening(transferId, screening(Screening.Outcome.HIT, LATER));
+
+        assertThat(cleared.screening()).isEqualTo(screening(Screening.Outcome.CLEAR, NOW));
+        assertThat(cleared.state()).isEqualTo(PaymentState.NEW);
+        assertThat(again).isEqualTo(cleared);
+    }
+
+    @Test
+    void shouldRejectHitOnceWithRr04() {
+        UUID transferId = stored();
+        payments.recordScreening(transferId, screening(Screening.Outcome.HIT, NOW));
+
+        boolean refused = payments.recordSanctionsRefusal(transferId, "REFUSAL-1", LATER);
+        boolean again = payments.recordSanctionsRefusal(transferId, "REFUSAL-2", LATER);
+
+        assertThat(refused).isTrue();
+        assertThat(again).isFalse();
+        OutgoingPayment payment = payments.find(transferId).orElseThrow();
+        assertThat(payment.state()).isEqualTo(PaymentState.REJECTED);
+        assertThat(payment.reasonCode()).isEqualTo(StatusReason.REGULATORY_REASON);
+        assertThat(payment.reportId()).isEqualTo("REFUSAL-1");
+        assertThat(payment.answeredAt()).isEqualTo(LATER);
+    }
+
+    @Test
+    void shouldRejectOnSanctionsOnlyAfterHit() {
+        UUID unscreened = stored();
+        UUID cleared = stored();
+        payments.recordScreening(cleared, screening(Screening.Outcome.CLEAR, NOW));
+
+        assertThat(payments.recordSanctionsRefusal(unscreened, "REFUSAL-1", LATER)).isFalse();
+        assertThat(payments.recordSanctionsRefusal(cleared, "REFUSAL-2", LATER)).isFalse();
+        assertThat(payments.find(cleared).orElseThrow().state()).isEqualTo(PaymentState.NEW);
+    }
+
+    @Test
+    void shouldNotAllowSendingHit() {
+        UUID transferId = stored();
+        payments.recordScreening(transferId, screening(Screening.Outcome.HIT, NOW));
+
+        assertThatThrownBy(() -> payments.recordSent(transferId, LATER, LATER))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("outgoing_payment_hit_never_sent");
+    }
+
+    private UUID stored() {
+        UUID transferId = UUID.randomUUID();
+        payments.insertIfAbsent(transferId, idOf(transferId), "<pacs008/>", NOW);
+        return transferId;
+    }
+
+    private static Screening screening(Screening.Outcome outcome, Instant at) {
+        return new Screening(outcome, "SCR-" + outcome, at);
+    }
+
     private UUID sent(Instant sentAt) {
         UUID transferId = UUID.randomUUID();
         payments.insertIfAbsent(transferId, idOf(transferId), "<pacs008/>", sentAt);

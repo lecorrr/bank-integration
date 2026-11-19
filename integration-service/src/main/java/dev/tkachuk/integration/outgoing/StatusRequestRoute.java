@@ -13,22 +13,12 @@ import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.springframework.stereotype.Component;
 
-/**
- * Asks about the payments whose answer is late. Every pollInterval, each payment due a status request gets a
- * pacs.028, and StatusRequestPolicy says when to ask next; the answers come back through AnswerRoute like any
- * other pacs.002. A payment with no final answer is never refused for that: from alarm-after requests on, each
- * request is logged as an error, for a person to take the payment up with the other bank.
- *
- * <p>Nothing here needs retrying: a payment whose request fails (RabbitMQ or PostgreSQL down) keeps its claim
- * until the lease runs out, a minute later, and is claimed again then.
- */
+/** Flow A: sends a pacs.028 for every payment whose status request is due. */
 @Component
 class StatusRequestRoute extends RouteBuilder {
 
-    /** How long a claimed payment is held back from the next claim while its request goes out. */
     static final Duration CLAIM_LEASE = Duration.ofMinutes(1);
 
-    /** The most payments asked about per poll; the rest wait for the next poll. */
     static final int BATCH_SIZE = 100;
 
     private static final String PAYMENT = "payment";
@@ -45,10 +35,11 @@ class StatusRequestRoute extends RouteBuilder {
 
     @Override
     public void configure() {
+        // A failed request stays claimed until its lease runs out, then it is picked up again.
         onException(Exception.class)
                 .handled(true)
                 .maximumRedeliveries(0)
-                .process(exchange -> log.warn("A status request failed; it is tried again after its lease: {}",
+                .process(exchange -> log.warn("Status request failed, will retry after the lease expires: {}",
                         Routes.failureOf(exchange)));
 
         from("timer:status-requests?period=" + policy.pollInterval().toMillis())
@@ -66,7 +57,6 @@ class StatusRequestRoute extends RouteBuilder {
         exchange.getMessage().setBody(payments.claimDue(now, now.plus(CLAIM_LEASE), BATCH_SIZE));
     }
 
-    /** About the pacs.008 as stored: a resend went out with the same MsgId, so it is the same payment. */
     private void toPacs028(Exchange exchange) {
         OutgoingPayment payment = exchange.getMessage().getBody(OutgoingPayment.class);
         Pacs028 request = Pacs028.about(Pacs008.parse(payment.pacs008()), Routes.newMessageId(),
@@ -81,11 +71,11 @@ class StatusRequestRoute extends RouteBuilder {
         payments.recordStatusRequest(payment.transferId(), payment.timesSent(),
                 policy.nextCheck(clock.instant(), requests));
         if (policy.needsAttention(requests)) {
-            log.error("Transfer {} has no final answer after {} status requests about pacs.008 {}, sent at {}; "
-                    + "take it up with the partner bank", payment.transferId(), requests, payment.messageId(),
+            log.error("Transfer {} has no final answer after {} status requests (pacs.008 {}, sent {}), "
+                    + "check with the partner bank", payment.transferId(), requests, payment.messageId(),
                     payment.sentAt());
         } else {
-            log.info("Transfer {} has no final answer yet: status request {} about pacs.008 {}", payment.transferId(),
+            log.info("Transfer {}: status request {} for pacs.008 {}", payment.transferId(),
                     requests, payment.messageId());
         }
     }

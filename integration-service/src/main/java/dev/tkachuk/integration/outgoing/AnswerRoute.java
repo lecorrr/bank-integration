@@ -17,20 +17,7 @@ import org.apache.camel.Predicate;
 import org.apache.camel.builder.RouteBuilder;
 import org.springframework.stereotype.Component;
 
-/**
- * Flow A, second leg: the other bank's pacs.002 answers come from RabbitMQ, to payments and to status requests
- * alike, and Answers decides what each one does. A definite answer goes to bank-core as a status event; "never
- * received" sends the payment again.
- *
- * <p>At least once, and a repeat is harmless. RabbitMQ keeps the message until every step is done: the status
- * event first, then the payment's new state. A crash in between brings the answer again, the event goes out a
- * second time, and bank-core ignores the copy (its ALREADY_APPLIED). A step that fails, with Kafka or PostgreSQL
- * down, is tried until it works (Routes.retryUntilItWorks). On shutdown the message goes back to the queue
- * instead of being dropped, and comes again after the restart.
- *
- * <p>An answer that cannot be acted on is never dropped either: it goes to bank.pacs002.dlq as it came, with
- * the reason in its dead-letter-reason header, for a person to look at.
- */
+/** Flow A: the partner bank's pacs.002 answers become status events for bank-core. */
 @Component
 class AnswerRoute extends RouteBuilder {
 
@@ -61,6 +48,8 @@ class AnswerRoute extends RouteBuilder {
                 .process(this::toDeadLetter)
                 .to(Routes.toQueue(BANK_PACS002_DLQ));
 
+        // The status event goes out before the answer is recorded: once a final answer is recorded, a repeat
+        // changes nothing, so recording first could lose the event for good.
         from(Routes.fromQueue(BANK_PACS002))
                 .routeId("pacs002-to-status")
                 .convertBodyTo(String.class)
@@ -81,20 +70,19 @@ class AnswerRoute extends RouteBuilder {
                 .end();
     }
 
-    /** Reads the answer, finds the payment it is about, and decides; an answer that cannot be acted on throws. */
     private void decide(Exchange exchange) {
         Pacs002 report = Pacs002.parse(exchange.getMessage().getBody(String.class));
         OutgoingPayment payment = payments.findByMessageId(report.originalMessageId())
-                .orElseThrow(() -> new UnusableAnswerException("pacs.002 " + report.messageId() + " answers pacs.008 "
-                        + report.originalMessageId() + ", which is not a payment of ours"));
+                .orElseThrow(() -> new UnusableAnswerException("pacs.002 " + report.messageId()
+                        + " answers unknown pacs.008 " + report.originalMessageId()));
         if (!payment.transferId().toString().equals(report.originalUetr())) {
-            throw new UnusableAnswerException("pacs.002 " + report.messageId() + " gives our pacs.008 "
-                    + payment.messageId() + " another payment's UETR");
+            throw new UnusableAnswerException("pacs.002 " + report.messageId() + " has the wrong UETR for pacs.008 "
+                    + payment.messageId());
         }
         Action action = Answers.decide(payment.state(), report);
         if (action == Action.CONFLICT) {
-            throw new UnusableAnswerException("pacs.002 " + report.messageId() + " says " + outcomeOf(report)
-                    + " about transfer " + payment.transferId() + ", which is " + payment.state() + " already");
+            throw new UnusableAnswerException("pacs.002 " + report.messageId() + " (" + outcomeOf(report)
+                    + ") conflicts with transfer " + payment.transferId() + ", already " + payment.state());
         }
         exchange.setProperty(PAYMENT, payment);
         exchange.setProperty(REPORT, report);
@@ -113,13 +101,10 @@ class AnswerRoute extends RouteBuilder {
         };
         log.info("Transfer {} is {} (pacs.002 {}, {})", payment.transferId(), status, report.messageId(),
                 outcomeOf(report));
-        // Nothing of the other bank's message reaches bank-core but what the event carries. Keyed by transfer, so
-        // the statuses of one transfer stay in order.
         Routes.asKafkaEvent(exchange, payment.transferId().toString(),
                 json.write(TransferStatusChanged.reported(payment.transferId(), status, report)));
     }
 
-    /** Recorded only after bank-core has the event: a crash in between sends the event again, and loses nothing. */
     private void recordAnswer(Exchange exchange) {
         OutgoingPayment payment = paymentOf(exchange);
         switch (actionOf(exchange)) {
@@ -133,11 +118,10 @@ class AnswerRoute extends RouteBuilder {
         }
     }
 
-    /** The pacs.008 exactly as it first went out, so its MsgId lets the other bank drop it if it did arrive. */
     private void toStoredPacs008(Exchange exchange) {
         OutgoingPayment payment = paymentOf(exchange);
         Pacs002 report = reportOf(exchange);
-        log.warn("Transfer {}: the partner bank never received pacs.008 {} (pacs.002 {}, {}); sending it again",
+        log.warn("Transfer {}: partner bank did not receive pacs.008 {} (pacs.002 {}, {}), resending",
                 payment.transferId(), payment.messageId(), report.messageId(), outcomeOf(report));
         Routes.asInterbankMessage(exchange, payment.messageId(), payment.pacs008());
     }
@@ -149,21 +133,20 @@ class AnswerRoute extends RouteBuilder {
 
     private void askAgain(Exchange exchange) {
         OutgoingPayment payment = paymentOf(exchange);
-        log.info("Transfer {}: the partner bank refused a copy of pacs.008 {} as a duplicate (pacs.002 {}); asking "
-                + "what became of the payment itself", payment.transferId(), payment.messageId(),
-                reportOf(exchange).messageId());
+        log.info("Transfer {}: copy of pacs.008 {} rejected as a duplicate (pacs.002 {}), requesting status",
+                payment.transferId(), payment.messageId(), reportOf(exchange).messageId());
         payments.askNow(payment.transferId(), clock.instant());
     }
 
     private void logNothingNew(Exchange exchange) {
         OutgoingPayment payment = paymentOf(exchange);
         Pacs002 report = reportOf(exchange);
-        log.info("Transfer {} is {}: pacs.002 {} ({}) changes nothing", payment.transferId(), payment.state(),
+        log.info("Transfer {} already {}, ignoring pacs.002 {} ({})", payment.transferId(), payment.state(),
                 report.messageId(), outcomeOf(report));
     }
 
     private void toDeadLetter(Exchange exchange) {
-        log.error("A pacs.002 goes to {} for a person to look at: {}", BANK_PACS002_DLQ, Routes.failureOf(exchange));
+        log.error("Moving pacs.002 to {}: {}", BANK_PACS002_DLQ, Routes.failureOf(exchange));
         Routes.asQueueDeadLetter(exchange);
     }
 
@@ -172,7 +155,6 @@ class AnswerRoute extends RouteBuilder {
         return exchange -> wanted.contains(actionOf(exchange));
     }
 
-    /** E.g. "RJCT AC04", or "ACSC" when the report gives no reason. */
     private static String outcomeOf(Pacs002 report) {
         return report.reasonCode() == null ? report.status().name() : report.status() + " " + report.reasonCode();
     }

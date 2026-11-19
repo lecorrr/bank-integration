@@ -1,0 +1,28 @@
+{
+  "name": "Anything else: clear",
+  "priority": 10,
+  "request": {
+    "method": "POST",
+    "url": "/ws/screening",
+    "headers": {
+      "SOAPAction": {
+        "contains": "urn:bank-integration:sanctions-screening:1:ScreenPayment"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matchesXPath": "/Envelope/Body/ScreenPaymentRequest"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/xml; charset=utf-8"
+    },
+    "bodyFileName": "screen-payment-clear.xml",
+    "transformers": [
+      "response-template"
+    ]
+  }
+}

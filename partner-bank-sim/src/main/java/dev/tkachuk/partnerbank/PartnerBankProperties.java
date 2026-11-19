@@ -3,15 +3,7 @@ package dev.tkachuk.partnerbank;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/**
- * How the simulated partner bank decides. A payment to one of its closed accounts is refused, the way a real bank
- * refuses a payment to an account it has closed. A payment to a silent account is received and never decided,
- * as if its answer were lost, so bank-integration has to ask for it. Every other valid payment is accepted.
- * Checked when the simulator starts, so a mistyped IBAN stops it there instead of silently never matching.
- *
- * @param closedAccounts IBANs in capitals without spaces, as a pacs.008 carries them
- * @param silentAccounts the same, for payments that get no answer
- */
+/** Test accounts: closed ones are refused with AC04, silent ones never get an answer. */
 @ConfigurationProperties("partner-bank")
 record PartnerBankProperties(List<String> closedAccounts, List<String> silentAccounts) {
 
@@ -34,7 +26,6 @@ record PartnerBankProperties(List<String> closedAccounts, List<String> silentAcc
         return silentAccounts.contains(iban);
     }
 
-    /** No list means no such accounts; every entry must be a valid IBAN. */
     private static List<String> checked(String property, List<String> ibans) {
         if (ibans == null) {
             return List.of();

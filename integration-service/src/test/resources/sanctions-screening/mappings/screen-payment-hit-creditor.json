@@ -1,0 +1,28 @@
+{
+  "name": "A listed payee: a hit",
+  "priority": 2,
+  "request": {
+    "method": "POST",
+    "url": "/ws/screening",
+    "headers": {
+      "SOAPAction": {
+        "contains": "urn:bank-integration:sanctions-screening:1:ScreenPayment"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matchesXPath": "/Envelope/Body/ScreenPaymentRequest/Party[Role='CREDITOR'][Name='Sanctioned Test Entity']"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/xml; charset=utf-8"
+    },
+    "bodyFileName": "screen-payment-hit-creditor.xml",
+    "transformers": [
+      "response-template"
+    ]
+  }
+}

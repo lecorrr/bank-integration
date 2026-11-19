@@ -8,7 +8,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** The rules a record checks when it is built, before any XML exists. */
 class FieldsTest {
 
     static Stream<Arguments> valuesThatBreakTheirRule() {
@@ -31,7 +30,7 @@ class FieldsTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("valuesThatBreakTheirRule")
-    void refusesAValueThatBreaksItsRuleWithoutQuotingIt(String value, ThrowingCallable check, String rule,
+    void shouldRejectInvalidValueWithoutQuotingIt(String value, ThrowingCallable check, String rule,
             String part) {
         assertThatThrownBy(check)
                 .isInstanceOf(IllegalArgumentException.class)

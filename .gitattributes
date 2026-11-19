@@ -1,5 +1,5 @@
-# Shell scripts must keep LF endings or bash on Linux fails with "\r: command not found".
+# Shell scripts need LF, or bash fails with "\r: command not found".
 *.sh text eol=lf
 mvnw text eol=lf
-# The ISO 20022 schemas stay byte for byte as published, CRLF line endings included (SchemaFilesTest checks).
+# ISO 20022 schemas stay exactly as published, CRLF included (SchemaFilesTest).
 *.xsd -text

@@ -8,6 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
 
+/** Stands in for the other bank: answers our pacs.008 and pacs.028, and sends us payments when asked over REST. */
 @SpringBootApplication
 @ConfigurationPropertiesScan
 public class PartnerBankSimApplication {
@@ -21,7 +22,6 @@ public class PartnerBankSimApplication {
         return Clock.systemUTC();
     }
 
-    /** The same topology as integration-service declares, from the same class, so the two always agree. */
     @Bean
     Declarables interbankTopology() {
         return InterbankTopology.declarables();

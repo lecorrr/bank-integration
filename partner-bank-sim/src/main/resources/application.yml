@@ -2,39 +2,32 @@ spring:
   application:
     name: partner-bank-sim
   rabbitmq:
-    # The compose RabbitMQ on localhost; in Docker, compose sets RABBITMQ_HOST=rabbitmq.
     host: ${RABBITMQ_HOST:localhost}
     port: 5672
     username: ${RABBITMQ_USER:interbank}
     password: ${RABBITMQ_PASSWORD:interbank}
 
 server:
-  # 8080 is bank-core, 8082 integration-service.
   port: 8083
 
 partner-bank:
-  # Payments to these accounts are refused with a pacs.002 RJCT, reason AC04 (the account is closed), and
-  # bank-core gives the money back.
+  # Payments to these accounts are rejected with AC04 (account closed).
   closed-accounts:
     - UA843888880000000000000000999
-  # Payments to these accounts are received and never decided, as if the answer were lost: integration-service
-  # asks about them with pacs.028 status requests, and the answer is PDNG (pending) every time.
+  # Payments to these accounts never get an answer; status requests about them get PDNG.
   silent-accounts:
     - UA443888880000000000000000555
-  # Every other payment is accepted.
-  # The bank as a payer: its payments to bank-core's customers, sent over HTTP (POST /api/payments).
+  # Payments this bank sends to bank-core's bank (POST /api/payments).
   sending:
     bic: PRTBUAUKXXX
     customer-iban: UA643888880000000000000000777
     customer-name: Olena Kovalenko
-    # bank-core's bank, the payee's bank of every payment this bank sends.
     payee-bank-bic: BNKCUAUKXXX
 
 camel:
   component:
     spring-rabbitmq:
-      # The exchange, queues and bindings come from InterbankTopology, declared once by Spring's RabbitAdmin.
-      auto-declare: false
+      auto-declare: false   # queues are declared by InterbankTopology
 
 management:
   endpoints:

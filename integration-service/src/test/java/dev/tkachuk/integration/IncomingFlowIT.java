@@ -7,6 +7,7 @@ import static dev.tkachuk.interbank.InterbankTopology.BANK_PACS028_DLQ;
 import static dev.tkachuk.interbank.InterbankTopology.EXCHANGE;
 import static dev.tkachuk.interbank.InterbankTopology.PARTNER_PACS002;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import dev.tkachuk.integration.incoming.IncomingTransferDecided;
 import dev.tkachuk.integration.incoming.IncomingTransferReceived;
@@ -17,6 +18,7 @@ import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.Pacs028;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -36,18 +39,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.testcontainers.kafka.KafkaContainer;
 import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Flow B on our side, against a real PostgreSQL, RabbitMQ and Kafka. The test plays both neighbours: the partner
- * bank, which sends the pacs.008 and its status requests and takes our answers off its queue, and bank-core, which
- * reads the payment from Kafka and publishes its decision. Every test pays with a payment of its own, under its own
- * UETR and MsgId, so no test sees another's messages.
- */
 @ServiceIntegrationTest
 class IncomingFlowIT {
 
-    /** Generous: the first test also waits for the service's Kafka consumer to join its group. */
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
-    /** How long to watch for a message that must not come. */
     private static final Duration QUIET = Duration.ofSeconds(3);
     private static final String DEAD_LETTER_TOPIC = IncomingTransferDecided.TOPIC + ".DLT";
 
@@ -60,6 +55,9 @@ class IncomingFlowIT {
     @Autowired
     private KafkaContainer kafka;
 
+    @Autowired
+    private TestScreeningService screening;
+
     private TestKafka bankCore;
     private TestRabbit partnerBank;
 
@@ -67,15 +65,19 @@ class IncomingFlowIT {
     void declareTheTopologyAndEmptyTheQueues() {
         bankCore = new TestKafka(kafka, TIMEOUT);
         partnerBank = new TestRabbit(rabbit);
-        // Declares InterbankTopology now, so no message is published before its queue exists.
         admin.initialize();
         for (String queue : InterbankTopology.queues()) {
             admin.purgeQueue(queue, false);
         }
     }
 
+    @AfterEach
+    void putTheScreeningServiceBack() {
+        screening.reset();
+    }
+
     @Test
-    void aPaymentGoesToBankCoreAndIsAnsweredAcscOnceBankCoreCreditsIt() throws Exception {
+    void shouldAnswerAcscWhenBankCoreCreditsPayment() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
 
@@ -93,7 +95,7 @@ class IncomingFlowIT {
 
     @ParameterizedTest(name = "{0} is answered {1}")
     @CsvSource({"UNKNOWN_ACCOUNT, AC01", "CURRENCY_MISMATCH, CURR", "ACCOUNT_FROZEN, MS03"})
-    void aPaymentBankCoreRefusesIsAnsweredRjctWithTheIsoCodeForItsReason(String reason, String reasonCode)
+    void shouldAnswerRjctWithIsoReasonWhenBankCoreRejects(String reason, String reasonCode)
             throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
@@ -107,7 +109,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aPaymentOurBankRefusesItselfIsAnsweredAtOnceAndNeverReachesBankCore() {
+    void shouldRejectInvalidPaymentWithoutBankCore() {
         Pacs008 payment = TestPayments.another().currency("USD").build();
         send(payment);
 
@@ -118,7 +120,49 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aCopyOfAnAnsweredPaymentGetsTheSameAnswerAgainAndBankCoreHearsOfItOnce() throws Exception {
+    void shouldRejectSanctionedPayerWithRr04() {
+        Pacs008 payment = TestPayments.another().debtorName(TestScreeningService.LISTED_NAME).build();
+        send(payment);
+
+        Pacs002 answer = takeAnswer(payment.messageId());
+        assertThat(answer.status()).isEqualTo(TransactionStatus.RJCT);
+        assertThat(answer.reasonCode()).isEqualTo(StatusReason.REGULATORY_REASON);
+        send(payment);
+        assertThat(takeAnswer(payment.messageId()).messageId()).as("the answer to a copy")
+                .isEqualTo(answer.messageId());
+        assertThat(transfersWithin(payment, 1, QUIET)).as("a transfer for bank-core").isEmpty();
+    }
+
+    @Test
+    void shouldHoldPaymentWhileScreeningIsDown() throws Exception {
+        screening.goDown();
+        Pacs008 payment = TestPayments.another().build();
+        send(payment);
+
+        await().atMost(TIMEOUT).until(() -> screening.breakerState() == CircuitBreaker.State.OPEN);
+        assertThat(answerTo(ask(payment)).status()).as("the answer while it waits").isEqualTo(TransactionStatus.PDNG);
+        assertThat(transfersWithin(payment, 1, QUIET)).as("a transfer for bank-core").isEmpty();
+        screening.comeBack();
+
+        takeTransfer(payment);
+        decide(payment, UUID.randomUUID(), "CREDITED", null);
+        assertThat(takeAnswer(payment.messageId()).status()).isEqualTo(TransactionStatus.ACSC);
+    }
+
+    @Test
+    void shouldMovePaymentToDlqWhenScreeningRefusesRequest() {
+        screening.refuseEverything();
+        Pacs008 payment = TestPayments.another().build();
+        send(payment);
+
+        Message dead = partnerBank.deadLetter(BANK_PACS008_DLQ, TIMEOUT);
+        assertThat(TestRabbit.bodyOf(dead)).isEqualTo(payment.toXml());
+        assertThat(TestRabbit.reasonOf(dead)).contains(payment.uetr()).contains("refused");
+        assertThat(screening.breakerState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
+    void shouldRepeatAnswerForDuplicateOfAnsweredPayment() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
@@ -132,7 +176,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aCopyOfAPaymentBankCoreHasNotDecidedOnGoesToBankCoreAgain() throws Exception {
+    void shouldForwardDuplicateAgainWhileUndecided() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         send(payment);
@@ -143,7 +187,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void anotherMessageForAPaymentWeHaveIsRefusedAsADuplicateAndThePaymentsAnswerStands() throws Exception {
+    void shouldRejectSecondMessageForSamePaymentWithAm05() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
@@ -160,7 +204,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aStatusRequestIsAnsweredPendingUntilBankCoreDecidesAndThenWithTheAnswerInANewReport() throws Exception {
+    void shouldAnswerStatusRequestPendingUntilBankCoreDecides() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
@@ -175,7 +219,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aStatusRequestAboutAPaymentWeNeverReceivedIsAnsweredAg09() {
+    void shouldAnswerAg09ForUnknownPayment() {
         Pacs008 neverSent = TestPayments.another().build();
 
         Pacs002 answer = answerTo(ask(neverSent));
@@ -185,7 +229,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void anUnreadablePaymentGoesToTheDeadLetterQueueAsItCame() {
+    void shouldMoveUnreadablePaymentToDlq() {
         rabbit.convertAndSend(EXCHANGE, BANK_PACS008, "<Document/>");
 
         Message dead = partnerBank.deadLetter(BANK_PACS008_DLQ, TIMEOUT);
@@ -194,7 +238,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aPaymentThatReusesTheMessageIdOfAnotherGoesToTheDeadLetterQueue() throws Exception {
+    void shouldMovePaymentReusingMessageIdToDlq() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
@@ -207,7 +251,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aStatusRequestFromABankOutsideTheDirectoryGoesToTheDeadLetterQueue() {
+    void shouldMoveStatusRequestFromUnknownBankToDlq() {
         Pacs008 payment = TestPayments.another().debtorAgentBic("UNKNUAUKXXX").build();
 
         ask(payment);
@@ -217,14 +261,13 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aDecisionAboutAPaymentWeNeverReceivedGoesToTheDeadLetterTopicAndTheNextDecisionStillGoesOut()
+    void shouldMoveDecisionForUnknownPaymentToDltAndContinue()
             throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
         String unknownPayment = UUID.randomUUID().toString();
         String aboutNoPayment = decision(unknownPayment, UUID.randomUUID(), "CREDITED", null);
-        // Keyed like the decision after it, so the two share a partition, where the second must not wait behind it.
         bankCore.publish(IncomingTransferDecided.TOPIC, payment.uetr(), aboutNoPayment);
 
         decide(payment, UUID.randomUUID(), "CREDITED", null);
@@ -238,7 +281,7 @@ class IncomingFlowIT {
     }
 
     @Test
-    void aDecisionThatContradictsOurAnswerGoesToTheDeadLetterTopicAndTheAnswerStands() throws Exception {
+    void shouldMoveConflictingDecisionToDltAndKeepAnswer() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
@@ -250,12 +293,12 @@ class IncomingFlowIT {
 
         ConsumerRecord<String, String> deadLetter =
                 bankCore.records(DEAD_LETTER_TOPIC, TestKafka.keyed(payment.uetr()), 1).getFirst();
-        assertThat(TestKafka.headerOf(deadLetter, "dead-letter-reason")).contains("answered ACSC already");
+        assertThat(TestKafka.headerOf(deadLetter, "dead-letter-reason")).contains("conflicts with our answer ACSC");
         assertThat(answerTo(ask(payment)).status()).isEqualTo(answer.status());
     }
 
     @Test
-    void aDecisionThatComesAgainSendsTheSameAnswerAgain() throws Exception {
+    void shouldResendSameAnswerForRepeatedDecision() throws Exception {
         Pacs008 payment = TestPayments.another().build();
         send(payment);
         takeTransfer(payment);
@@ -268,19 +311,16 @@ class IncomingFlowIT {
         assertThat(takeAnswer(payment.messageId())).isEqualTo(first);
     }
 
-    /** Sends the payment as the partner bank does. */
     private void send(Pacs008 payment) {
         rabbit.convertAndSend(EXCHANGE, BANK_PACS008, payment.toXml());
     }
 
-    /** Asks about the payment as the partner bank does, and returns the request. */
     private Pacs028 ask(Pacs008 payment) {
         Pacs028 request = Pacs028.about(payment, newMessageId(), now());
         rabbit.convertAndSend(EXCHANGE, BANK_PACS028, request.toXml());
         return request;
     }
 
-    /** Decides on the payment as bank-core does: its event as JSON text, keyed by the UETR. */
     private void decide(Pacs008 payment, UUID transferId, String decision, String reason) throws Exception {
         bankCore.publish(IncomingTransferDecided.TOPIC, payment.uetr(),
                 decision(payment.uetr(), transferId, decision, reason));
@@ -293,7 +333,6 @@ class IncomingFlowIT {
                 """.formatted(uetr, transferId, decision, reason == null ? "null" : "\"" + reason + "\"");
     }
 
-    /** The payment as bank-core reads it from Kafka. */
     private Map<?, ?> takeTransfer(Pacs008 payment) {
         List<ConsumerRecord<String, String>> transfers = transfersWithin(payment, 1, TIMEOUT);
         assertThat(transfers).as("the payment for bank-core on " + IncomingTransferReceived.TOPIC).hasSize(1);
@@ -308,7 +347,6 @@ class IncomingFlowIT {
                 count, wait);
     }
 
-    /** Our next pacs.002 about the message with this MsgId. */
     private Pacs002 takeAnswer(String originalMessageId) {
         Pacs002 answer = partnerBank.next(PARTNER_PACS002, TIMEOUT, Pacs002::parse,
                 candidate -> candidate.originalMessageId().equals(originalMessageId));

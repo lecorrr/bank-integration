@@ -1,6 +1,8 @@
 package dev.tkachuk.integration.outgoing;
 
+import dev.tkachuk.integration.screening.Screening;
 import dev.tkachuk.interbank.iso20022.Pacs002;
+import dev.tkachuk.interbank.iso20022.StatusReason;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -13,10 +15,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
- * The transfers to other banks, in table outgoing_payment: each one sent, or refused by our bank. Each change is
- * one conditional UPDATE that names the states it may start from, so the routes, which run side by side, cannot
- * undo each other's work: a "sent" that arrives after the answer leaves the answer standing, and nothing changes
- * a final answer.
+ * Table outgoing_payment. Every update names the states it may start from, so routes running side by side can't
+ * undo each other's work, and a final answer never changes.
  */
 @Component
 class OutgoingPayments {
@@ -27,10 +27,6 @@ class OutgoingPayments {
         this.jdbc = jdbc;
     }
 
-    /**
-     * Stores the payment as NEW, unless its transfer has one already, and returns the payment as stored: for a
-     * repeated event, the first event's message and state.
-     */
     OutgoingPayment insertIfAbsent(UUID transferId, String messageId, String pacs008, Instant now) {
         jdbc.sql("""
                         INSERT INTO outgoing_payment (transfer_id, message_id, pacs008, state, created_at)
@@ -41,15 +37,10 @@ class OutgoingPayments {
                 .param("pacs008", pacs008)
                 .param("now", utc(now))
                 .update();
-        // Only a message id taken by another transfer leaves no row; ids come from the transfer id, so never.
         return find(transferId).orElseThrow(() -> new IllegalStateException(
                 "Transfer " + transferId + " was not stored: its message id " + messageId + " is taken"));
     }
 
-    /**
-     * Our bank's own refusal to send the transfer, kept as its final answer under the refusal's id, so a repeated
-     * event is not decided again, not even after a change to the directory of banks.
-     */
     void recordRefusal(UUID transferId, String messageId, String refusalId, Instant now) {
         jdbc.sql("""
                         INSERT INTO outgoing_payment
@@ -61,6 +52,33 @@ class OutgoingPayments {
                 .param("refusalId", refusalId)
                 .param("now", utc(now))
                 .update();
+    }
+
+    OutgoingPayment recordScreening(UUID transferId, Screening screening) {
+        jdbc.sql("""
+                        UPDATE outgoing_payment
+                        SET screening_outcome = :outcome, screening_id = :screeningId, screened_at = :screenedAt
+                        WHERE transfer_id = :transferId AND screening_outcome IS NULL""")
+                .param("transferId", transferId)
+                .param("outcome", screening.outcome().name())
+                .param("screeningId", screening.screeningId())
+                .param("screenedAt", utc(screening.screenedAt()))
+                .update();
+        return find(transferId).orElseThrow(() -> new IllegalStateException(
+                "Transfer " + transferId + " was screened, but it is not stored"));
+    }
+
+    boolean recordSanctionsRefusal(UUID transferId, String refusalId, Instant now) {
+        int updated = jdbc.sql("""
+                        UPDATE outgoing_payment
+                        SET state = 'REJECTED', report_id = :refusalId, reason_code = :reasonCode, answered_at = :now
+                        WHERE transfer_id = :transferId AND state = 'NEW' AND screening_outcome = 'HIT'""")
+                .param("transferId", transferId)
+                .param("refusalId", refusalId)
+                .param("reasonCode", StatusReason.REGULATORY_REASON)
+                .param("now", utc(now))
+                .update();
+        return updated == 1;
     }
 
     Optional<OutgoingPayment> find(UUID transferId) {
@@ -77,7 +95,6 @@ class OutgoingPayments {
                 .optional();
     }
 
-    /** The pacs.008 went out, the first time or again: the status requests start over, the first at firstCheckAt. */
     void recordSent(UUID transferId, Instant sentAt, Instant firstCheckAt) {
         jdbc.sql("""
                         UPDATE outgoing_payment
@@ -90,7 +107,6 @@ class OutgoingPayments {
                 .update();
     }
 
-    /** PDNG: the other bank has the payment and has not decided. */
     void recordPending(UUID transferId) {
         jdbc.sql("""
                         UPDATE outgoing_payment SET state = 'PENDING'
@@ -99,11 +115,6 @@ class OutgoingPayments {
                 .update();
     }
 
-    /**
-     * The final answer and the report that gave it; nothing to ask about after that.
-     *
-     * @return false when the payment had a final answer already, which then stands
-     */
     boolean recordFinal(UUID transferId, PaymentState state, Pacs002 report, Instant now) {
         if (!state.isFinal()) {
             throw new IllegalArgumentException(state + " is not a final answer");
@@ -122,7 +133,6 @@ class OutgoingPayments {
         return updated == 1;
     }
 
-    /** Due a status request now, ahead of its schedule. */
     void askNow(UUID transferId, Instant now) {
         jdbc.sql("""
                         UPDATE outgoing_payment SET next_check_at = :now
@@ -133,11 +143,8 @@ class OutgoingPayments {
     }
 
     /**
-     * Up to limit payments whose status request is due, the longest due first, each held back until leaseUntil:
-     * its next check moves there, so a second instance of the service, or this one after a crash, does not ask
-     * about it meanwhile. SKIP LOCKED lets two instances claim at once without waiting for each other. Only open
-     * payments have a next check at all; the state condition is there because it is the partial index's own, so
-     * PostgreSQL can use that index.
+     * Claims due payments by moving their next check to leaseUntil. SKIP LOCKED lets several instances claim at
+     * once without waiting for each other.
      */
     List<OutgoingPayment> claimDue(Instant now, Instant leaseUntil, int limit) {
         return jdbc.sql("""
@@ -156,10 +163,7 @@ class OutgoingPayments {
                 .list();
     }
 
-    /**
-     * A status request went out about the payment as it was claimed: one more, and the next at nextCheckAt.
-     * Skipped if the payment went out again meanwhile (its timesSent moved on), whose requests then started over.
-     */
+    // Skipped if the payment was sent again in the meantime (timesSent changed).
     void recordStatusRequest(UUID transferId, int timesSent, Instant nextCheckAt) {
         jdbc.sql("""
                         UPDATE outgoing_payment SET status_requests = status_requests + 1, next_check_at = :nextCheckAt
@@ -183,7 +187,9 @@ class OutgoingPayments {
                 instantOf(row, "next_check_at"),
                 row.getString("report_id"),
                 row.getString("reason_code"),
-                instantOf(row, "answered_at"));
+                instantOf(row, "answered_at"),
+                Screening.stored(row.getString("screening_outcome"), row.getString("screening_id"),
+                        instantOf(row, "screened_at")));
     }
 
     private static Instant instantOf(ResultSet row, String column) throws SQLException {
@@ -191,7 +197,7 @@ class OutgoingPayments {
         return value == null ? null : value.toInstant();
     }
 
-    /** The PostgreSQL driver binds an OffsetDateTime to timestamptz; it has no binding for Instant. */
+    // The PostgreSQL driver binds OffsetDateTime to timestamptz, but not Instant.
     private static OffsetDateTime utc(Instant instant) {
         return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
     }

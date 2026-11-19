@@ -11,35 +11,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
-/**
- * Turns bank-core's transfer into the pacs.008 that goes to the other bank:
- *
- * <pre>
- * pacs.008                      from
- * GrpHdr/MsgId                  the transfer id, without hyphens
- * GrpHdr/CreDtTm                now
- * PmtId/EndToEndId              NOTPROVIDED: the payer gave no reference of their own
- * PmtId/TxId                    the transfer id, without hyphens
- * PmtId/UETR                    the transfer id
- * IntrBkSttlmAmt                amount, in hryvnia with two decimals
- * IntrBkSttlmDt                 today in Kyiv
- * Dbtr/Nm, DbtrAcct             fromName, fromIban
- * DbtrAgt                       our BIC
- * Cdtr/Nm, CdtrAcct             toName, toIban
- * CdtrAgt                       the BIC of the bank whose code is in toIban
- * RmtInf/Ustrd                  description
- * </pre>
- *
- * Every id comes from the transfer id, so the same transfer always gives a message with the same ids: a
- * redelivered event finds its payment stored under the transfer id, and a payment sent again repeats its MsgId,
- * by which the other bank drops the copy. The pacs.002 names the payment by that MsgId and the UETR.
- */
+/** Builds the pacs.008 for a transfer, or refuses a transfer our bank can't send through SEP. */
 @Component
 class Pacs008Mapper {
 
-    /** ISO 20022's word for an end-to-end id the payer did not give; bank-core's API asks for none. */
     static final String NOT_PROVIDED = "NOTPROVIDED";
-    /** The business day follows Kyiv time: a payment at 01:00 Kyiv time settles on the Kyiv date. */
     private static final ZoneId BANK_ZONE = ZoneId.of("Europe/Kyiv");
 
     private final InterbankProperties bank;
@@ -50,13 +26,12 @@ class Pacs008Mapper {
         this.clock = clock;
     }
 
-    /** @throws TransferRefusedException when our bank cannot send this transfer through SEP */
     Pacs008 toPacs008(TransferRequested transfer) {
         requireFromOurBank(transfer);
         String creditorAgentBic = creditorAgentBicOf(transfer);
         if (!InterbankProperties.SETTLEMENT_CURRENCY.equals(transfer.currency())) {
-            throw new TransferRefusedException(transfer.transferId(), "the currency is " + transfer.currency()
-                    + ", and SEP settles " + InterbankProperties.SETTLEMENT_CURRENCY + " only");
+            throw new TransferRefusedException(transfer.transferId(), "currency " + transfer.currency()
+                    + " is not supported, SEP settles " + InterbankProperties.SETTLEMENT_CURRENCY + " only");
         }
         Instant now = clock.instant().truncatedTo(ChronoUnit.SECONDS);
         String id = messageIdOf(transfer.transferId());
@@ -68,7 +43,7 @@ class Pacs008Mapper {
                 transfer.transferId().toString(),
                 inKopiyky(transfer),
                 InterbankProperties.SETTLEMENT_CURRENCY,
-                LocalDate.ofInstant(now, BANK_ZONE),
+                LocalDate.ofInstant(now, BANK_ZONE), // settlement date in Kyiv, not UTC
                 transfer.fromName(),
                 transfer.fromIban(),
                 bank.bic(),
@@ -81,40 +56,33 @@ class Pacs008Mapper {
     private String creditorAgentBicOf(TransferRequested transfer) {
         String code = bankCodeOf(transfer.toIban());
         if (code.equals(bank.bankCode())) {
-            throw new TransferRefusedException(transfer.transferId(),
-                    "toIban is an account at our own bank, and bank-core moves money between those itself");
+            throw new TransferRefusedException(transfer.transferId(), "toIban is an account at our own bank");
         }
         return bank.participantBic(code).orElseThrow(() -> new TransferRefusedException(transfer.transferId(),
-                "toIban is an account at bank " + code + ", which is not in the directory of participants"));
+                "toIban belongs to bank " + code + ", which is not a participant"));
     }
 
     private void requireFromOurBank(TransferRequested transfer) {
         String code = bankCodeOf(transfer.fromIban());
         if (!code.equals(bank.bankCode())) {
             throw new TransferRefusedException(transfer.transferId(),
-                    "fromIban is an account at bank " + code + ", not at ours (" + bank.bankCode() + ")");
+                    "fromIban belongs to bank " + code + ", not ours (" + bank.bankCode() + ")");
         }
     }
 
-    /** 150 becomes 150.00; 150.005 is refused rather than rounded, because rounding would change the amount. */
     private static BigDecimal inKopiyky(TransferRequested transfer) {
         try {
             return transfer.amount().setScale(2);
         } catch (ArithmeticException e) {
-            throw new TransferRefusedException(transfer.transferId(),
-                    "the amount has more than two decimals, and hryvnia have 100 kopiyky");
+            throw new TransferRefusedException(transfer.transferId(), "amount has more than two decimals");
         }
     }
 
-    /** TransferRequested checked that both IBANs are Ukrainian, so each has a bank code. */
     private static String bankCodeOf(String ukrainianIban) {
         return InterbankProperties.bankCodeOf(ukrainianIban).orElseThrow();
     }
 
-    /**
-     * The transfer's MsgId, which is also its TxId: the transfer id without hyphens, 32 hex characters, within
-     * ISO 20022's 35-character limit for ids, where the 36 of a UUID are not.
-     */
+    // MsgId and TxId come from the transfer id, so a resend repeats them and the other bank sees the same payment.
     static String messageIdOf(UUID transferId) {
         return transferId.toString().replace("-", "");
     }

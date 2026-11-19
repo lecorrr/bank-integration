@@ -21,7 +21,6 @@ public class IntegrationServiceApplication {
         return Clock.systemUTC();
     }
 
-    /** The interbank exchange, queues and bindings. Spring's RabbitAdmin declares them on the first connection. */
     @Bean
     Declarables interbankTopology() {
         return InterbankTopology.declarables();

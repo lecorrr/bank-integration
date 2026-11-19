@@ -17,7 +17,7 @@ class SentPaymentsTest {
     private final SentPayments sent = new SentPayments();
 
     @Test
-    void remembersAPaymentAndCountsEveryTimeItWentOut() {
+    void shouldCountEverySend() {
         Pacs008 payment = TestPayments.toBankCore(UUID.randomUUID().toString());
 
         sent.remember(payment);
@@ -32,7 +32,7 @@ class SentPaymentsTest {
     }
 
     @Test
-    void keepsEveryAnswerAboutAPaymentOldestFirst() {
+    void shouldKeepAnswersInOrder() {
         Pacs008 payment = TestPayments.toBankCore(UUID.randomUUID().toString());
         sent.remember(payment);
         Pacs002 pending = Pacs002.answering(payment, TransactionStatus.PDNG, "ANSWER-1", NOW);
@@ -46,7 +46,7 @@ class SentPaymentsTest {
     }
 
     @Test
-    void anAnswerAboutAPaymentItDoesNotRememberIsNotKept() {
+    void shouldIgnoreAnswerForUnknownPayment() {
         Pacs008 neverSent = TestPayments.toBankCore(UUID.randomUUID().toString());
 
         assertThat(sent.recordAnswer(Pacs002.rejecting(neverSent, StatusReason.NOT_SPECIFIED, "ANSWER-1", NOW)))
@@ -55,7 +55,7 @@ class SentPaymentsTest {
     }
 
     @Test
-    void forgetsTheOldestPaymentFirst() {
+    void shouldForgetOldestPaymentFirst() {
         SentPayments small = new SentPayments(2);
         Pacs008 oldest = TestPayments.toBankCore(UUID.randomUUID().toString());
         Pacs008 middle = TestPayments.toBankCore(UUID.randomUUID().toString());
@@ -71,7 +71,7 @@ class SentPaymentsTest {
     }
 
     @Test
-    void aSnapshotDoesNotChangeWithLaterAnswers() {
+    void shouldReturnSnapshotUnaffectedByLaterAnswers() {
         Pacs008 payment = TestPayments.toBankCore(UUID.randomUUID().toString());
         sent.remember(payment);
         SentPayments.Sent before = sent.find(payment.uetr()).orElseThrow();

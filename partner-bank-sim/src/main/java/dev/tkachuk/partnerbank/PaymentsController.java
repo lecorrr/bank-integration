@@ -15,22 +15,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * The partner bank's payments to bank-core's customers (flow B), over HTTP, for demos and tests:
- *
- * <pre>
- * POST /api/payments                         sends a payment; 202 with its UETR and MsgId
- * GET  /api/payments/{uetr}                  the payment and every answer about it
- * POST /api/payments/{uetr}/status-requests  asks about it with a pacs.028; 202 with the request's MsgId
- * </pre>
- *
- * 202, because the answer comes later, over RabbitMQ: GET shows it once it has.
- */
+/** POST a payment to bank-core's bank, then GET it to see the answers. */
 @RestController
 @RequestMapping("/api/payments")
 class PaymentsController {
 
-    /** SEP settles hryvnia, so a payment without a currency is in hryvnia. */
     private static final String HRYVNIA = "UAH";
 
     private final PaymentSender sender;
@@ -64,13 +53,11 @@ class PaymentsController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    /** A payment a pacs.008 cannot carry, such as one without a payee name: the reason names the field. */
     @ExceptionHandler({IllegalArgumentException.class, InvalidMessageException.class})
     ResponseEntity<ErrorResponse> refuse(RuntimeException e) {
         return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
     }
 
-    /** @param currency UAH when left out */
     record PaymentRequest(String toIban, String toName, BigDecimal amount, String currency, String description) {
     }
 
@@ -94,7 +81,6 @@ class PaymentsController {
         }
     }
 
-    /** @param reasonCode null for an answer without one, such as ACSC */
     record AnswerView(String messageId, String status, String reasonCode, Instant createdAt) {
 
         static AnswerView of(Pacs002 answer) {

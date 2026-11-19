@@ -13,7 +13,7 @@ class TransferStatusChangedTest {
     private static final Instant REPORTED_AT = Instant.parse("2026-11-17T08:30:05Z");
 
     @Test
-    void carriesTheStatusUnderTheReportsIdAndTime() {
+    void shouldCarryStatusWithReportIdAndTime() {
         Pacs002 report = new Pacs002("67a65fa611fe4db9bc67b8271c441990", REPORTED_AT,
                 "0f5bd7c23a4e4c1b9d0e6f2a8b1c3d4e", "NOTPROVIDED", "0f5bd7c23a4e4c1b9d0e6f2a8b1c3d4e",
                 TestTransfers.TRANSFER_ID.toString(), TransactionStatus.ACSC, null);
@@ -28,7 +28,7 @@ class TransferStatusChangedTest {
     }
 
     @Test
-    void refusesAnEventWithoutAStatus() {
+    void shouldRequireStatus() {
         assertThatThrownBy(() -> new TransferStatusChanged(TestTransfers.TRANSFER_ID, null, "ANSWER-1", REPORTED_AT))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("required");
