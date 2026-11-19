@@ -2,6 +2,7 @@ package dev.tkachuk.integration.outgoing;
 
 import dev.tkachuk.integration.screening.Screening;
 import dev.tkachuk.interbank.iso20022.Pacs002;
+import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -27,18 +28,22 @@ class OutgoingPayments {
         this.jdbc = jdbc;
     }
 
-    OutgoingPayment insertIfAbsent(UUID transferId, String messageId, String pacs008, Instant now) {
+    OutgoingPayment insertIfAbsent(UUID transferId, Pacs008 payment, String xml, Instant now) {
         jdbc.sql("""
-                        INSERT INTO outgoing_payment (transfer_id, message_id, pacs008, state, created_at)
-                        VALUES (:transferId, :messageId, :pacs008, 'NEW', :now)
+                        INSERT INTO outgoing_payment (transfer_id, message_id, pacs008, state, created_at,
+                            settlement_date, amount, currency)
+                        VALUES (:transferId, :messageId, :pacs008, 'NEW', :now, :settlementDate, :amount, :currency)
                         ON CONFLICT DO NOTHING""")
                 .param("transferId", transferId)
-                .param("messageId", messageId)
-                .param("pacs008", pacs008)
+                .param("messageId", payment.messageId())
+                .param("pacs008", xml)
                 .param("now", utc(now))
+                .param("settlementDate", payment.settlementDate())
+                .param("amount", payment.amount())
+                .param("currency", payment.currency())
                 .update();
         return find(transferId).orElseThrow(() -> new IllegalStateException(
-                "Transfer " + transferId + " was not stored: its message id " + messageId + " is taken"));
+                "Transfer " + transferId + " was not stored: its message id " + payment.messageId() + " is taken"));
     }
 
     void recordRefusal(UUID transferId, String messageId, String refusalId, Instant now) {

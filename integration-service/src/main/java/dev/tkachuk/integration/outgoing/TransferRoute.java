@@ -96,8 +96,7 @@ class TransferRoute extends RouteBuilder {
 
     private OutgoingPayment storeNew(TransferRequested transfer) {
         Pacs008 payment = mapper.toPacs008(transfer);
-        return payments.insertIfAbsent(transfer.transferId(), payment.messageId(), xmlOf(transfer, payment),
-                clock.instant());
+        return payments.insertIfAbsent(transfer.transferId(), payment, xmlOf(transfer, payment), clock.instant());
     }
 
     private static String xmlOf(TransferRequested transfer, Pacs008 payment) {

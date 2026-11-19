@@ -6,6 +6,7 @@ import dev.tkachuk.interbank.iso20022.TransactionStatus;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -25,15 +26,18 @@ class IncomingPayments {
 
     Optional<IncomingPayment> insertIfAbsent(IncomingPayment payment) {
         jdbc.sql("""
-                        INSERT INTO incoming_payment (uetr, sender_bic, message_id, pacs008, received_at, status,
-                            reason_code, report_id, answered_at)
-                        VALUES (:uetr, :senderBic, :messageId, :pacs008, :receivedAt, :status, :reasonCode, :reportId,
-                            :answeredAt)
+                        INSERT INTO incoming_payment (uetr, sender_bic, message_id, pacs008, settlement_date, amount,
+                            currency, received_at, status, reason_code, report_id, answered_at)
+                        VALUES (:uetr, :senderBic, :messageId, :pacs008, :settlementDate, :amount, :currency,
+                            :receivedAt, :status, :reasonCode, :reportId, :answeredAt)
                         ON CONFLICT DO NOTHING""")
                 .param("uetr", payment.uetr())
                 .param("senderBic", payment.senderBic())
                 .param("messageId", payment.messageId())
                 .param("pacs008", payment.pacs008())
+                .param("settlementDate", payment.settlementDate())
+                .param("amount", payment.amount())
+                .param("currency", payment.currency())
                 .param("receivedAt", utc(payment.receivedAt()))
                 .param("status", payment.status() == null ? null : payment.status().name())
                 .param("reasonCode", payment.reasonCode())
@@ -122,6 +126,9 @@ class IncomingPayments {
                 row.getString("sender_bic"),
                 row.getString("message_id"),
                 row.getString("pacs008"),
+                row.getObject("settlement_date", LocalDate.class),
+                row.getBigDecimal("amount"),
+                row.getString("currency"),
                 instantOf(row, "received_at"),
                 status == null ? null : TransactionStatus.valueOf(status),
                 row.getString("reason_code"),

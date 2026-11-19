@@ -3,12 +3,14 @@ package dev.tkachuk.partnerbank;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.tkachuk.interbank.iso20022.CreditDebit;
 import dev.tkachuk.interbank.iso20022.InvalidMessageException;
 import dev.tkachuk.interbank.iso20022.Pacs002;
 import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.Pacs028;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -22,7 +24,8 @@ class StatusReportsTest {
     private static final PartnerBankProperties ACCOUNTS =
             new PartnerBankProperties(List.of(TestPayments.CLOSED_ACCOUNT), List.of(TestPayments.SILENT_ACCOUNT));
 
-    private final StatusReports statusReports = new StatusReports(CLOCK, ACCOUNTS);
+    private final CorrespondentAccount account = new CorrespondentAccount(CLOCK, new BigDecimal("1000000.00"), 100);
+    private final StatusReports statusReports = new StatusReports(CLOCK, ACCOUNTS, account);
 
     @Test
     void shouldAcceptPaymentWithItsIds() {
@@ -35,6 +38,27 @@ class StatusReportsTest {
         assertThat(report.originalMessageId()).isEqualTo("MSG-1");
         assertThat(report.originalUetr()).isEqualTo(payment.uetr());
         assertThat(report.createdAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void shouldDebitAcceptedPaymentFromBankCoresAccount() {
+        Pacs008 payment = TestPayments.pacs008("MSG-1");
+
+        statusReports.answerPayment(payment.toXml());
+
+        assertThat(account.openDay().bookings()).singleElement().satisfies(booking -> {
+            assertThat(booking.direction()).isEqualTo(CreditDebit.DBIT);
+            assertThat(booking.uetr()).isEqualTo(payment.uetr());
+            assertThat(booking.amount()).isEqualByComparingTo("150.00");
+        });
+    }
+
+    @Test
+    void shouldNotBookPaymentItRejectsOrLeavesUnanswered() {
+        statusReports.answerPayment(TestPayments.pacs008("MSG-1", TestPayments.CLOSED_ACCOUNT).toXml());
+        statusReports.answerPayment(TestPayments.pacs008("MSG-2", TestPayments.SILENT_ACCOUNT).toXml());
+
+        assertThat(account.openDay().bookings()).isEmpty();
     }
 
     @Test
@@ -129,7 +153,7 @@ class StatusReportsTest {
 
     @Test
     void shouldForgetOldestPaymentWhenFull() {
-        StatusReports smallMemory = new StatusReports(CLOCK, ACCOUNTS, 2);
+        StatusReports smallMemory = new StatusReports(CLOCK, ACCOUNTS, account, 2);
         Pacs008 oldest = TestPayments.pacs008("MSG-1");
         smallMemory.answerPayment(oldest.toXml());
         smallMemory.answerPayment(TestPayments.pacs008("MSG-2").toXml());

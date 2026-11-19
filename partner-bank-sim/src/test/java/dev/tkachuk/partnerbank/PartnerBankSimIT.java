@@ -13,11 +13,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.tkachuk.interbank.InterbankTopology;
+import dev.tkachuk.interbank.iso20022.Camt053;
+import dev.tkachuk.interbank.iso20022.CreditDebit;
 import dev.tkachuk.interbank.iso20022.Pacs002;
 import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.Pacs028;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
+import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -40,7 +43,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(RabbitTestcontainer.class)
+@Import({RabbitTestcontainer.class, SftpTestcontainer.class})
 class PartnerBankSimIT {
 
     private static final long RECEIVE_TIMEOUT_MS = 10_000;
@@ -54,6 +57,9 @@ class PartnerBankSimIT {
 
     @Autowired
     private MockMvc mvc;
+
+    @Autowired
+    private TestSftp sftp;
 
     @BeforeEach
     void declareTheTopologyAndEmptyTheQueues() {
@@ -226,6 +232,60 @@ class PartnerBankSimIT {
 
         mvc.perform(get("/api/payments/{uetr}", unknown)).andExpect(status().isNotFound());
         mvc.perform(post("/api/payments/{uetr}/status-requests", unknown)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void shouldLeaveStatementOfAcceptedPaymentsOnSftp() throws Exception {
+        Pacs008 ours = TestPayments.fromBankCore(UUID.randomUUID().toString(), "150.00");
+        rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, ours.toXml());
+        takeAnswer();
+        sendPayment(aPaymentToBankCore());
+        Pacs008 theirs = Pacs008.parse(bodyOf(takeFrom(BANK_PACS008)));
+        rabbit.convertAndSend(EXCHANGE, PARTNER_PACS002,
+                Pacs002.answering(theirs, TransactionStatus.ACSC, newMessageId(), now()).toXml());
+        firstAnswerTo(theirs.uetr());
+
+        Map<?, ?> sent = sendStatement("");
+
+        Camt053 statement = Camt053.parse(sftp.read((String) sent.get("fileName")));
+        assertThat(statement.messageId()).isEqualTo(sent.get("messageId"));
+        assertThat(statement.accountIban()).isEqualTo("UA853888880000000000000000399");
+        assertThat(statement.entries()).extracting(entry -> entry.creditDebit() + " " + entry.uetr() + " "
+                + entry.amount()).contains("DBIT " + ours.uetr() + " 150.00", "CRDT " + theirs.uetr() + " 250.00");
+    }
+
+    @Test
+    void shouldPutRequestedFaultsInStatement() throws Exception {
+        Pacs008 ours = TestPayments.fromBankCore(UUID.randomUUID().toString(), "150.00");
+        rabbit.convertAndSend(EXCHANGE, PARTNER_PACS008, ours.toXml());
+        takeAnswer();
+
+        Map<?, ?> sent = sendStatement("""
+                {"changeAmounts": {"%s": 149.00}, "addUnknown": [{"direction": "CRDT", "amount": 10.00}]}
+                """.formatted(ours.uetr()));
+
+        Camt053 statement = Camt053.parse(sftp.read((String) sent.get("fileName")));
+        assertThat(statement.entries()).filteredOn(entry -> entry.uetr().equals(ours.uetr()))
+                .extracting(Camt053.Entry::amount).containsExactly(new BigDecimal("149.00"));
+        assertThat(statement.entries().getLast().creditDebit()).isEqualTo(CreditDebit.CRDT);
+        assertThat(statement.entries().getLast().amount()).isEqualByComparingTo("10.00");
+    }
+
+    @Test
+    void shouldRefuseFaultForPaymentItDidNotBook() throws Exception {
+        String body = mvc.perform(post("/api/statements").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"leaveOut\": [\"" + UUID.randomUUID() + "\"]}"))
+                .andExpect(status().isBadRequest())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(String.valueOf(new JsonMapper().readValue(body, Map.class).get("error"))).contains("is not booked");
+    }
+
+    private Map<?, ?> sendStatement(String faults) throws Exception {
+        String body = mvc.perform(post("/api/statements").contentType(MediaType.APPLICATION_JSON).content(faults))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return new JsonMapper().readValue(body, Map.class);
     }
 
     private static String aPaymentToBankCore() {

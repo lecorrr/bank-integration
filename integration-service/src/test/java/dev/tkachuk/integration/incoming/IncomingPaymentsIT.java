@@ -8,6 +8,7 @@ import dev.tkachuk.integration.screening.Screening;
 import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -54,6 +55,15 @@ class IncomingPaymentsIT {
         assertThat(payments.insertIfAbsent(refused)).contains(refused);
         assertThat(payments.find(refused.uetr()).orElseThrow().answer().reasonCode())
                 .isEqualTo(StatusReason.NOT_ALLOWED_CURRENCY);
+    }
+
+    @Test
+    void shouldKeepAmountAsSent() {
+        Pacs008 payment = TestPayments.another().amount("150.005").build();
+        IncomingPayment refused = IncomingPayment.refused(payment, payment.toXml(), RECEIVED_AT,
+                StatusReason.INVALID_AMOUNT, "REFUSAL-1");
+
+        assertThat(payments.insertIfAbsent(refused).orElseThrow().amount()).isEqualTo(new BigDecimal("150.005"));
     }
 
     @Test

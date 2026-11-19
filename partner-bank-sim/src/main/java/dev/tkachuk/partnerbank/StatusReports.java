@@ -30,16 +30,19 @@ class StatusReports {
 
     private final Clock clock;
     private final PartnerBankProperties properties;
+    private final CorrespondentAccount account;
     private final Map<String, Received> received;
 
     @Autowired
-    StatusReports(Clock clock, PartnerBankProperties properties) {
-        this(clock, properties, REMEMBERED_PAYMENTS);
+    StatusReports(Clock clock, PartnerBankProperties properties, CorrespondentAccount account) {
+        this(clock, properties, account, REMEMBERED_PAYMENTS);
     }
 
-    StatusReports(Clock clock, PartnerBankProperties properties, int rememberedPayments) {
+    StatusReports(Clock clock, PartnerBankProperties properties, CorrespondentAccount account,
+            int rememberedPayments) {
         this.clock = clock;
         this.properties = properties;
+        this.account = account;
         this.received = new LinkedHashMap<>() {
             @Override
             protected boolean removeEldestEntry(Map.Entry<String, Received> eldest) {
@@ -91,6 +94,7 @@ class StatusReports {
         Pacs002 report = Pacs002.answering(payment, TransactionStatus.ACSC, newMessageId(), now());
         log.info("pacs.008 {}: {} {} credited, answering pacs.002 {} {}", payment.messageId(),
                 payment.amount().toPlainString(), payment.currency(), report.messageId(), report.status());
+        account.debit(payment);
         return report;
     }
 

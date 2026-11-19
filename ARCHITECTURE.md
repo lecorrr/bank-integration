@@ -1,14 +1,14 @@
 # Architecture
 
-Version 0.7.3. Three Maven modules: a shared contract and two Spring Boot 4.1 applications on Apache Camel 4.22.
+Version 0.8.0. Three Maven modules: a shared contract and two Spring Boot 4.1 applications on Apache Camel 4.22.
 
 ## Modules
 
 | Module | Contains | Depends on |
 |---|---|---|
-| `interbank-contract` | `InterbankTopology` (exchange, queues, bindings), the ISO 20022 messages `Pacs008`, `Pacs002` and `Pacs028` as records over JAXB classes generated from the official XSDs, `StatusReason`, `TransactionStatus` | Spring AMQP's topology types, JAXB |
-| `integration-service` | `outgoing` (flow A), `incoming` (flow B), `screening` (SOAP client and circuit breaker), `messaging` (`Routes`: endpoints and retry policies), `events` (Kafka JSON), `InterbankProperties` (our bank and the participants) | `interbank-contract` |
-| `partner-bank-sim` | The other bank: `StatusReports` answers our pacs.008 and pacs.028, `PaymentSender` and `PaymentsController` send its own payments, `SentPayments` keeps their answers | `interbank-contract` |
+| `interbank-contract` | `InterbankTopology` (exchange, queues, bindings), the ISO 20022 messages `Pacs008`, `Pacs002`, `Pacs028` and `Camt053` as records over JAXB classes generated from the official XSDs, `StatusReason`, `TransactionStatus`, `CreditDebit` | Spring AMQP's topology types, JAXB |
+| `integration-service` | `outgoing` (flow A), `incoming` (flow B), `reconciliation` (flow C), `screening` (SOAP client and circuit breaker), `messaging` (`Routes`: endpoints and retry policies), `events` (Kafka JSON), `InterbankProperties` (our bank and the participants) | `interbank-contract` |
+| `partner-bank-sim` | The other bank: `StatusReports` answers our pacs.008 and pacs.028, `PaymentSender` and `PaymentsController` send its own payments, `SentPayments` keeps their answers, `CorrespondentAccount` keeps our account and `StatementSender` sends its statements | `interbank-contract` |
 
 The two applications never depend on each other. bank-core and integration-service share only the Kafka events.
 
@@ -88,6 +88,41 @@ for a known UETR is rejected with AM05 and the payment's own answer stands.
 The first broken rule in `IncomingChecks` decides. Whether the account exists, and in which currency, only
 bank-core knows.
 
+## Flow C: reconciliation
+
+The partner bank keeps an account for our bank (our nostro account). Our payment to it is a debit there, its
+payment to us a credit. Every day it sends a camt.053 statement of the account, and we check each entry against
+our own payments, matched by UETR.
+
+```
+camt.053 in statements/ on the partner bank's SFTP server, polled every minute, oldest file name first
+  -> StatementRoute: is it for our account, from the bank that holds it?
+       store the statement and its entries (statement, statement_entry) -> log the breaks -> move to done/
+       not a camt.053 we accept, another account, a second one for the day -> move to error/
+       storing fails -> the file stays and is read again on the next poll
+
+GET /api/reconciliations/{date}
+  -> Reconciler: the day's statement, each entry next to our payment, and our payments settled that day that no
+     statement books
+```
+
+| Result | Entry or payment |
+|---|---|
+| `MATCHED` | booked, and settled on our side (SETTLED, or our ACSC) for the same amount |
+| `AMOUNT_MISMATCH` | booked and settled, for another amount |
+| `NOT_SETTLED` | booked, but our payment still waits for its final answer, or was rejected |
+| `UNKNOWN` | booked, but we have no such payment: a debit is looked up among outgoing payments, a credit among incoming ones |
+| `DUPLICATE` | booked again: an earlier entry, in this statement or an earlier one, booked the same payment |
+| `MISSING` | settled on our side with that settlement date, but booked in no statement |
+
+`MatchResult` holds these rules and `MatchResultTest` covers them. The report also says whether the opening
+balance is the previous statement's closing one; a gap means a statement in between is missing or wrong.
+
+The simulator books a payment when it is accepted, once per payment, on the day it is still open. Just after
+midnight in Kyiv it sends the statement of each finished day and closes it; `POST /api/statements` sends the
+open day's statement at once, faults included if asked. A booking made after its day was closed goes to the next
+day.
+
 ## Sanctions screening
 
 Both flows screen a payment right before sending it on, after our own checks. The contract is
@@ -145,6 +180,9 @@ our own.
 | The partner bank does not answer | pacs.028 status requests; the money stays held |
 | The screening service is down | The payment waits; the circuit breaker keeps the retries cheap |
 | bank-core is down (flow B) | The payment waits on Kafka; status requests get PDNG |
+| A statement file can't be used: not a camt.053 we accept, another account, a second one for the day | Moved to `error/` and logged; the first statement of the day stands |
+| PostgreSQL is down when a statement comes | The file stays in `statements/` and is read again on the next poll |
+| The SFTP server is down | Camel logs a warning and tries again on the next poll; the statement waits on the server |
 
 ## Decisions
 
@@ -188,4 +226,18 @@ our own.
   use `IS NOT DISTINCT FROM`, because a CHECK that evaluates to null passes.
 - **Released migrations are never edited.** Flyway checksums them and refuses to start on a mismatch.
 - **Kafka writes every message to disk** in the compose stack: a single broker has no replica to recover from.
+- **Reconciliation is worked out when asked.** Only facts are stored: the statement as it came, and each
+  payment's settlement date and amount. A late pacs.002 or a payment booked in a later statement shows up in the
+  next report without re-running anything; the breaks found when the statement comes are logged.
+- **One statement per day and account.** A second one is refused, not merged. A bank corrects its statement with
+  entries in a later one.
+- **A statement may book a payment twice.** That is the bank's mistake and reconciliation reports it, so
+  `Camt053` accepts it instead of refusing the whole statement.
+- **Settlement date and amount as columns.** Copied from the pacs.008 when a payment is stored (V4 fills them in
+  for older payments with `xpath`), so a day's report is a few indexed queries, without parsing XML. The amount
+  keeps its scale and currency as sent, since a refused payment may have three decimals or be in dollars.
+- **A statement file is moved, never deleted**, and written under a `.part` name, then renamed, so the reader
+  never sees half a file.
+- **The SFTP host key** is checked when `reconciliation.sftp.known-hosts-file` is set. The demo runs without it
+  and the log says so at startup.
 - **Coverage gate**: 80 % line coverage per module, generated classes excluded.

@@ -23,6 +23,18 @@ partner-bank:
     customer-iban: UA643888880000000000000000777
     customer-name: Olena Kovalenko
     payee-bank-bic: BNKCUAUKXXX
+  # bank-core's bank's account here. Its statement (camt.053) goes to SFTP after each day, or on
+  # POST /api/statements; the books are in memory and start again from opening-balance.
+  statements:
+    account-iban: UA853888880000000000000000399
+    opening-balance: 1000000.00
+    sftp:
+      host: ${SFTP_HOST:localhost}
+      port: ${SFTP_PORT:2222}
+      username: ${SFTP_USER:bnkc}
+      password: ${SFTP_PASSWORD:bnkc}
+      directory: statements
+      known-hosts-file: ${SFTP_KNOWN_HOSTS:}
 
 camel:
   component:

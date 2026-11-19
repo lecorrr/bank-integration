@@ -39,6 +39,17 @@ final class TestPayments {
                 "Rent for November");
     }
 
+    static Pacs008 fromBankCore(String uetr, String amount) {
+        return fromBankCore(uetr, amount, "UAH");
+    }
+
+    static Pacs008 fromBankCore(String uetr, String amount, String currency) {
+        String messageId = uetr.replace("-", "");
+        return new Pacs008(messageId, Instant.parse("2026-11-17T08:30:00Z"), PaymentSender.NOT_PROVIDED, messageId,
+                uetr, new BigDecimal(amount), currency, LocalDate.parse("2026-11-17"), "Artem Tkachuk",
+                BANK_CORE_CUSTOMER, "BNKCUAUKXXX", "Olena Kovalenko", OPEN_ACCOUNT, "PRTBUAUKXXX", "Rent for November");
+    }
+
     static Pacs008 toBankCore(String uetr) {
         String messageId = uetr.replace("-", "");
         return new Pacs008(messageId, Instant.parse("2026-11-18T09:15:00Z"), PaymentSender.NOT_PROVIDED, messageId,

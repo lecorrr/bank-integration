@@ -26,11 +26,14 @@ class PartnerBankRoutes extends RouteBuilder {
     private final StatusReports statusReports;
     private final SentPayments sentPayments;
     private final PaymentSender sender;
+    private final CorrespondentAccount account;
 
-    PartnerBankRoutes(StatusReports statusReports, SentPayments sentPayments, PaymentSender sender) {
+    PartnerBankRoutes(StatusReports statusReports, SentPayments sentPayments, PaymentSender sender,
+            CorrespondentAccount account) {
         this.statusReports = statusReports;
         this.sentPayments = sentPayments;
         this.sender = sender;
+        this.account = account;
     }
 
     @Override
@@ -65,12 +68,17 @@ class PartnerBankRoutes extends RouteBuilder {
 
     private void recordAnswer(Exchange exchange) {
         Pacs002 answer = Pacs002.parse(exchange.getMessage().getBody(String.class));
-        Optional<SentPayments.Sent> payment = sentPayments.recordAnswer(answer);
+        Optional<SentPayments.Sent> payment = sentPayments.find(answer.originalUetr());
         if (payment.isEmpty()) {
             log.warn("pacs.002 {} refers to unknown pacs.008 {} (payment {})", answer.messageId(),
                     answer.originalMessageId(), answer.originalUetr());
             return;
         }
+        // Booked before the answer shows in the REST API, so whoever sees the ACSC there finds it on the account.
+        if (answer.status() == TransactionStatus.ACSC) {
+            account.credit(payment.get().payment());
+        }
+        sentPayments.recordAnswer(answer);
         log.info("pacs.002 {} about pacs.008 {} (payment {}): {}{}", answer.messageId(), answer.originalMessageId(),
                 answer.originalUetr(), answer.status(), answer.reasonCode() == null ? "" : " " + answer.reasonCode());
         // Same rule as integration-service: resend a payment the other bank never received.

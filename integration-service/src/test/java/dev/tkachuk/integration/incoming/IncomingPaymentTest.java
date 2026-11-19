@@ -86,6 +86,7 @@ class IncomingPaymentTest {
 
     private IncomingPayment answered(TransactionStatus status, String reasonCode) {
         return new IncomingPayment(UUID.fromString(payment.uetr()), payment.debtorAgentBic(), payment.messageId(), xml,
-                RECEIVED_AT, status, reasonCode, "ANSWER-1", ANSWERED_AT, TRANSFER_ID, null);
+                payment.settlementDate(), payment.amount(), payment.currency(), RECEIVED_AT, status, reasonCode,
+                "ANSWER-1", ANSWERED_AT, TRANSFER_ID, null);
     }
 }

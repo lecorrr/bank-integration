@@ -7,7 +7,7 @@
     <parent>
         <groupId>dev.tkachuk</groupId>
         <artifactId>bank-integration</artifactId>
-        <version>0.7.3</version>
+        <version>0.8.0</version>
     </parent>
 
     <artifactId>interbank-contract</artifactId>
@@ -74,6 +74,19 @@
                             </schemaIncludes>
                             <generatePackage>dev.tkachuk.interbank.iso20022.pacs002</generatePackage>
                             <generateDirectory>${project.build.directory}/generated-sources/pacs002</generateDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>camt053</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <schemaIncludes>
+                                <include>camt.053.001.08.xsd</include>
+                            </schemaIncludes>
+                            <generatePackage>dev.tkachuk.interbank.iso20022.camt053</generatePackage>
+                            <generateDirectory>${project.build.directory}/generated-sources/camt053</generateDirectory>
                         </configuration>
                     </execution>
                     <execution>

@@ -56,6 +56,19 @@ sanctions-screening:
     wait-in-open-state: 30s
     permitted-calls-in-half-open-state: 2
 
+# The partner bank's daily statement (camt.053) of our account there, from the partner bank's SFTP server.
+reconciliation:
+  account-iban: UA853888880000000000000000399
+  poll-interval: 1m
+  sftp:
+    host: ${SFTP_HOST:localhost}
+    port: ${SFTP_PORT:2222}
+    username: ${SFTP_USER:bnkc}
+    password: ${SFTP_PASSWORD:bnkc}
+    directory: statements
+    # Without it the server's host key is not checked, which is only fine for the local demo.
+    known-hosts-file: ${SFTP_KNOWN_HOSTS:}
+
 management:
   endpoints:
     web:

@@ -64,12 +64,13 @@ services:
       KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 1
     mem_limit: 512m
 
+  # The partner bank's SFTP server. bnkc is our bank's login there; the partner bank leaves the daily statement
+  # of our account in statements/, and integration-service moves each file it reads to done/ or error/.
   sftp:
-    image: atmoz/sftp:alpine
+    image: atmoz/sftp:alpine   # same tag as sftp.image in pom.xml
     ports:
       - "127.0.0.1:2222:22"
-    # user:password:uid:gid:folder; camt.053 statements go here (step 7)
-    command: partner:partner:1001:1001:statements
+    command: bnkc:bnkc:1001:1001:statements   # user:password:uid:gid:folder
     mem_limit: 64m
 
   # Stand-in for the sanctions screening service: WireMock with the test stubs.
@@ -98,11 +99,16 @@ services:
         condition: service_started
       sanctions-screening:   # not required to be up: payments wait until screening answers
         condition: service_started
+      sftp:   # not required either: the statement is read on a later poll
+        condition: service_started
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/integration
       RABBITMQ_HOST: rabbitmq
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       SANCTIONS_SCREENING_URL: http://sanctions-screening:8080/ws/screening
+      SFTP_HOST: sftp
+      SFTP_PORT: "22"
+      RECONCILIATION_POLLINTERVAL: 10s   # reconciliation.poll-interval; 1m outside the demo
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs   # JSON logs for ELK (Project 3)
     ports:
       - "127.0.0.1:8082:8082"
@@ -117,8 +123,12 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      sftp:
+        condition: service_started
     environment:
       RABBITMQ_HOST: rabbitmq
+      SFTP_HOST: sftp
+      SFTP_PORT: "22"
       LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
     ports:
       - "127.0.0.1:8083:8083"

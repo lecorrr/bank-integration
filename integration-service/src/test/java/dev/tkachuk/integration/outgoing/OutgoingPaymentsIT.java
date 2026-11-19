@@ -6,12 +6,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.tkachuk.integration.TestDatabase;
 import dev.tkachuk.integration.screening.Screening;
 import dev.tkachuk.interbank.iso20022.Pacs002;
+import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.StatusReason;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
 import java.sql.Connection;
+import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,13 +39,29 @@ class OutgoingPaymentsIT {
     void shouldStorePaymentOnceAndReturnStoredOne() {
         UUID transferId = UUID.randomUUID();
 
-        OutgoingPayment first = payments.insertIfAbsent(transferId, idOf(transferId), "<first/>", NOW);
-        OutgoingPayment again = payments.insertIfAbsent(transferId, idOf(transferId), "<second/>", LATER);
+        OutgoingPayment first = payments.insertIfAbsent(transferId, paymentOf(transferId), "<first/>", NOW);
+        OutgoingPayment again = payments.insertIfAbsent(transferId, paymentOf(transferId), "<second/>", LATER);
 
         assertThat(first.state()).isEqualTo(PaymentState.NEW);
         assertThat(again).isEqualTo(first);
         assertThat(again.pacs008()).isEqualTo("<first/>");
         assertThat(payments.findByMessageId(idOf(transferId))).contains(first);
+    }
+
+    @Test
+    void shouldStoreWhatThePaymentSettles() {
+        UUID transferId = stored();
+
+        Settlement settlement = jdbc.sql("""
+                        SELECT settlement_date, amount, currency FROM outgoing_payment
+                        WHERE transfer_id = :transferId""")
+                .param("transferId", transferId)
+                .query((row, rowNumber) -> new Settlement(row.getObject("settlement_date", LocalDate.class),
+                        row.getBigDecimal("amount"), row.getString("currency")))
+                .single();
+
+        assertThat(settlement)
+                .isEqualTo(new Settlement(LocalDate.parse("2026-11-17"), new BigDecimal("150.00"), "UAH"));
     }
 
     @Test
@@ -86,7 +105,7 @@ class OutgoingPaymentsIT {
         UUID transferId = UUID.randomUUID();
 
         payments.recordRefusal(transferId, idOf(transferId), "REFUSAL-1", NOW);
-        payments.insertIfAbsent(transferId, idOf(transferId), "<pacs008/>", LATER);
+        payments.insertIfAbsent(transferId, paymentOf(transferId), "<pacs008/>", LATER);
 
         OutgoingPayment refused = payments.find(transferId).orElseThrow();
         assertThat(refused.state()).isEqualTo(PaymentState.REJECTED);
@@ -235,7 +254,7 @@ class OutgoingPaymentsIT {
 
     private UUID stored() {
         UUID transferId = UUID.randomUUID();
-        payments.insertIfAbsent(transferId, idOf(transferId), "<pacs008/>", NOW);
+        payments.insertIfAbsent(transferId, paymentOf(transferId), "<pacs008/>", NOW);
         return transferId;
     }
 
@@ -245,7 +264,7 @@ class OutgoingPaymentsIT {
 
     private UUID sent(Instant sentAt) {
         UUID transferId = UUID.randomUUID();
-        payments.insertIfAbsent(transferId, idOf(transferId), "<pacs008/>", sentAt);
+        payments.insertIfAbsent(transferId, paymentOf(transferId), "<pacs008/>", sentAt);
         payments.recordSent(transferId, sentAt, sentAt);
         return transferId;
     }
@@ -262,5 +281,15 @@ class OutgoingPaymentsIT {
 
     private static String idOf(UUID transferId) {
         return transferId.toString().replace("-", "");
+    }
+
+    private static Pacs008 paymentOf(UUID transferId) {
+        return new Pacs008(idOf(transferId), NOW, "NOTPROVIDED", idOf(transferId), transferId.toString(),
+                new BigDecimal("150.00"), "UAH", LocalDate.parse("2026-11-17"), "Artem Tkachuk",
+                TestTransfers.OUR_CUSTOMER, "BNKCUAUKXXX", "Olena Kovalenko", TestTransfers.PARTNER_CUSTOMER,
+                "PRTBUAUKXXX", "Rent for November");
+    }
+
+    private record Settlement(LocalDate date, BigDecimal amount, String currency) {
     }
 }

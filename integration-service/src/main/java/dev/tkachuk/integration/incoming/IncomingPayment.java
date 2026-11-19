@@ -4,7 +4,9 @@ import dev.tkachuk.integration.screening.Screening;
 import dev.tkachuk.interbank.iso20022.Pacs002;
 import dev.tkachuk.interbank.iso20022.Pacs008;
 import dev.tkachuk.interbank.iso20022.TransactionStatus;
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -14,6 +16,9 @@ record IncomingPayment(
         String senderBic,
         String messageId,
         String pacs008,
+        LocalDate settlementDate,
+        BigDecimal amount,
+        String currency,
         Instant receivedAt,
         TransactionStatus status,
         String reasonCode,
@@ -24,13 +29,15 @@ record IncomingPayment(
 
     static IncomingPayment received(Pacs008 payment, String xml, Instant receivedAt) {
         return new IncomingPayment(UUID.fromString(payment.uetr()), payment.debtorAgentBic(), payment.messageId(), xml,
-                receivedAt, null, null, null, null, null, null);
+                payment.settlementDate(), payment.amount(), payment.currency(), receivedAt, null, null, null, null,
+                null, null);
     }
 
     static IncomingPayment refused(Pacs008 payment, String xml, Instant receivedAt, String reasonCode,
             String reportId) {
         return new IncomingPayment(UUID.fromString(payment.uetr()), payment.debtorAgentBic(), payment.messageId(), xml,
-                receivedAt, TransactionStatus.RJCT, reasonCode, reportId, receivedAt, null, null);
+                payment.settlementDate(), payment.amount(), payment.currency(), receivedAt, TransactionStatus.RJCT,
+                reasonCode, reportId, receivedAt, null, null);
     }
 
     boolean answered() {

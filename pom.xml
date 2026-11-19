@@ -14,7 +14,7 @@
 
     <groupId>dev.tkachuk</groupId>
     <artifactId>bank-integration</artifactId>
-    <version>0.7.3</version>
+    <version>0.8.0</version>
     <packaging>pom</packaging>
     <name>bank-integration</name>
     <description>Moves bank-core's payments to other banks as ISO 20022 messages over RabbitMQ and Kafka</description>
@@ -40,6 +40,7 @@
         <rabbitmq.image>rabbitmq:4.3-management-alpine</rabbitmq.image>
         <kafka.image>apache/kafka-native:4.4.0</kafka.image>
         <postgres.image>postgres:17-alpine</postgres.image>
+        <sftp.image>atmoz/sftp:alpine</sftp.image>
         <jacoco.version>0.8.13</jacoco.version>
         <!-- Line coverage per module, unit and integration tests together. -->
         <coverage.minimum>0.80</coverage.minimum>
@@ -86,6 +87,7 @@
                             <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
                             <kafka.image>${kafka.image}</kafka.image>
                             <postgres.image>${postgres.image}</postgres.image>
+                            <sftp.image>${sftp.image}</sftp.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
@@ -97,6 +99,7 @@
                             <rabbitmq.image>${rabbitmq.image}</rabbitmq.image>
                             <kafka.image>${kafka.image}</kafka.image>
                             <postgres.image>${postgres.image}</postgres.image>
+                            <sftp.image>${sftp.image}</sftp.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
@@ -165,6 +168,7 @@
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <excludes>
                                 <exclude>dev/tkachuk/interbank/iso20022/pacs*/**</exclude>
+                                <exclude>dev/tkachuk/interbank/iso20022/camt053/**</exclude>
                                 <exclude>dev/tkachuk/integration/screening/soap/**</exclude>
                             </excludes>
                         </configuration>
@@ -180,6 +184,7 @@
                             <!-- Generated JAXB classes. -->
                             <excludes>
                                 <exclude>dev/tkachuk/interbank/iso20022/pacs*/**</exclude>
+                                <exclude>dev/tkachuk/interbank/iso20022/camt053/**</exclude>
                                 <exclude>dev/tkachuk/integration/screening/soap/**</exclude>
                             </excludes>
                             <rules>
